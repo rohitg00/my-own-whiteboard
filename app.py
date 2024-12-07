@@ -16,13 +16,12 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Redis Cache Configuration
 app.config['CACHE_TYPE'] = 'redis'
 redis_url = os.environ.get('REDIS_URL')
+if redis_url and not redis_url.startswith(('redis://', 'rediss://', 'unix://')):
+    redis_url = f"redis://{redis_url}"
+app.config['CACHE_REDIS_URL'] = redis_url
+app.config['CACHE_DEFAULT_TIMEOUT'] = 300 if redis_url else None
 
-# Ensure Redis URL has proper format and authentication
-if redis_url:
-    # Redis URL validation and formatting already handled by Flask-Caching
-    app.config['CACHE_REDIS_URL'] = redis_url
-    app.config['CACHE_DEFAULT_TIMEOUT'] = 300
-else:
+if not redis_url:
     # Fallback to simple cache if Redis URL not available
     app.config['CACHE_TYPE'] = 'simple'
     app.logger.warning('Redis URL not found, falling back to SimpleCache')
@@ -94,18 +93,24 @@ def handle_join(data):
 @socketio.on('draw')
 def handle_draw(data):
     room = data['room']
-    # Store drawing data in database
-    drawing = models.DrawingData(room_id=room, data=str(data['path']))
-    db.session.add(drawing)
-    db.session.commit()
-    
-    # Cache the latest drawing data
-    cache_key = f"drawing_data_{room}"
-    cached_data = cache.get(cache_key) or []
-    cached_data.append(data['path'])
-    cache.set(cache_key, cached_data, timeout=300)
-    
-    socketio.emit('draw_update', data, room=room, skip_sid=request.sid)
+    try:
+        # Store drawing data in database
+        drawing = models.DrawingData(room_id=room, data=str(data['path']))
+        db.session.add(drawing)
+        db.session.commit()
+        
+        # Update cache
+        cache_key = f"drawing_data_{room}"
+        cached_data = cache.get(cache_key) or []
+        cached_data.append(data['path'])
+        cache.set(cache_key, cached_data)
+        
+        # Broadcast to room
+        socketio.emit('draw_update', data, room=room, skip_sid=request.sid)
+    except Exception as e:
+        app.logger.error(f"Error saving drawing: {e}")
+        db.session.rollback()
+        socketio.emit('error', {'message': 'Failed to save drawing'}, room=request.sid)
 
 @socketio.on('clear')
 def handle_clear(data):

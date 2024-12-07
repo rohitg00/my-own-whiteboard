@@ -20,15 +20,19 @@ class Whiteboard {
     async loadExistingDrawings() {
         try {
             const response = await fetch(`/room/${this.roomId}/drawings`);
+            if (!response.ok) throw new Error('Failed to fetch drawings');
+            
             const data = await response.json();
             if (data.drawings && data.drawings.length > 0) {
                 data.drawings.forEach(path => {
-                    fabric.util.enlivenObjects([path], (objects) => {
-                        objects.forEach(obj => {
-                            this.canvas.add(obj);
+                    if (path) {  // Add null check
+                        fabric.util.enlivenObjects([path], (objects) => {
+                            objects.forEach(obj => {
+                                this.canvas.add(obj);
+                            });
+                            this.canvas.renderAll();
                         });
-                        this.canvas.renderAll();
-                    });
+                    }
                 });
             }
         } catch (error) {
@@ -42,12 +46,20 @@ class Whiteboard {
     }
 
     setupEventListeners() {
+        this.socket.on('error', (error) => {
+            console.error('Socket.IO error:', error);
+        });
+
         this.canvas.on('path:created', (e) => {
-            const path = e.path.toJSON();
-            this.socket.emit('draw', {
-                room: this.roomId,
-                path: path
-            });
+            try {
+                const path = e.path.toJSON();
+                this.socket.emit('draw', {
+                    room: this.roomId,
+                    path: path
+                });
+            } catch (error) {
+                console.error('Error sending drawing:', error);
+            }
         });
 
         this.socket.on('draw_update', (data) => {
