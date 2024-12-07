@@ -1,12 +1,11 @@
 class Whiteboard {
     constructor(canvasId, socket, roomId) {
         this.canvas = new fabric.Canvas(canvasId, {
-            isDrawingMode: true,
-            width: window.innerWidth * 0.9,
-            height: window.innerHeight * 0.8,
+            isDrawingMode: true
         });
         this.socket = socket;
         this.roomId = roomId;
+        this.initResponsiveCanvas();
         this.init();
     }
 
@@ -15,6 +14,35 @@ class Whiteboard {
         this.setupEventListeners();
         this.socket.emit('join', { room: this.roomId });
         this.loadExistingDrawings();
+    }
+
+    initResponsiveCanvas() {
+        // Set initial size
+        this.resizeCanvas();
+        
+        // Add window resize listener
+        window.addEventListener('resize', () => {
+            this.resizeCanvas();
+        });
+    }
+
+    resizeCanvas() {
+        const container = document.querySelector('.whiteboard-container');
+        const containerWidth = container.clientWidth;
+        const containerHeight = window.innerHeight * 0.8;
+
+        // Set canvas size based on container
+        this.canvas.setWidth(containerWidth - 40); // 40px padding
+        this.canvas.setHeight(containerHeight);
+        
+        // Scale objects if needed
+        const scale = containerWidth / this.canvas.getWidth();
+        const objects = this.canvas.getObjects();
+        objects.forEach(obj => {
+            obj.scale(scale);
+        });
+        
+        this.canvas.renderAll();
     }
 
     async loadExistingDrawings() {
