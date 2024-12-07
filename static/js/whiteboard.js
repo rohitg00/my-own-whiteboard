@@ -14,6 +14,26 @@ class Whiteboard {
         this.setupTools();
         this.setupEventListeners();
         this.socket.emit('join', { room: this.roomId });
+        this.loadExistingDrawings();
+    }
+
+    async loadExistingDrawings() {
+        try {
+            const response = await fetch(`/room/${this.roomId}/drawings`);
+            const data = await response.json();
+            if (data.drawings && data.drawings.length > 0) {
+                data.drawings.forEach(path => {
+                    fabric.util.enlivenObjects([path], (objects) => {
+                        objects.forEach(obj => {
+                            this.canvas.add(obj);
+                        });
+                        this.canvas.renderAll();
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Error loading existing drawings:', error);
+        }
     }
 
     setupTools() {
