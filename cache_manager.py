@@ -5,12 +5,20 @@ def cache_drawing(timeout=300):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            cache_key = f"drawing_{kwargs.get('room_id')}"
-            rv = cache.get(cache_key)
-            if rv is not None:
-                return rv
-            rv = f(*args, **kwargs)
-            cache.set(cache_key, rv, timeout=timeout)
-            return rv
+            room_id = kwargs.get('room_id')
+            cache_key = f"drawing_{room_id}"
+            
+            # Try to get cached data
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                return cached_data
+            
+            # Get fresh data
+            data = f(*args, **kwargs)
+            if data is not None:
+                # Store in cache with timeout
+                cache.set(cache_key, data, timeout=timeout)
+            return data
+            
         return decorated_function
     return decorator

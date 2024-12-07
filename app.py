@@ -1,7 +1,7 @@
 import os
 from flask import Flask, render_template, request, session
 from flask_sqlalchemy import SQLAlchemy
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, join_room, leave_room
 from flask_caching import Cache
 from sqlalchemy.orm import DeclarativeBase
 import logging
@@ -14,7 +14,8 @@ class Base(DeclarativeBase):
 db = SQLAlchemy(model_class=Base)
 socketio = SocketIO()
 cache = Cache(config={
-    'CACHE_TYPE': 'SimpleCache',
+    'CACHE_TYPE': 'redis',
+    'CACHE_REDIS_URL': os.environ.get('REDIS_URL', 'redis://localhost:6379/0'),
     'CACHE_DEFAULT_TIMEOUT': 300
 })
 
@@ -49,7 +50,7 @@ def handle_connect():
 @socketio.on('join')
 def handle_join(data):
     room = data['room']
-    socketio.join_room(room)
+    join_room(room)
     app.logger.info(f"Client {request.sid} joined room {room}")
 
 @socketio.on('draw')
