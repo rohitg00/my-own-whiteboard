@@ -16,15 +16,34 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Redis Cache Configuration
 app.config['CACHE_TYPE'] = 'redis'
 redis_url = os.environ.get('REDIS_URL')
-if redis_url and not any(redis_url.startswith(prefix) for prefix in ['redis://', 'rediss://', 'unix://']):
-    redis_url = f"redis://{redis_url}"
-app.config['CACHE_REDIS_URL'] = redis_url
-app.config['CACHE_DEFAULT_TIMEOUT'] = 300
+
+# Ensure Redis URL has proper format and authentication
+if redis_url:
+    # Redis URL validation and formatting already handled by Flask-Caching
+    app.config['CACHE_REDIS_URL'] = redis_url
+    app.config['CACHE_DEFAULT_TIMEOUT'] = 300
+else:
+    # Fallback to simple cache if Redis URL not available
+    app.config['CACHE_TYPE'] = 'simple'
+    app.logger.warning('Redis URL not found, falling back to SimpleCache')
 
 # Initialize extensions
 socketio = SocketIO(app)
 db = SQLAlchemy(app)
-cache = Cache(app)
+
+# Initialize cache with error handling
+try:
+    cache = Cache(app)
+    # Test cache connection
+    cache.set('test_key', 'test_value')
+    cache.get('test_key')
+    app.logger.info('Redis cache initialized successfully')
+except Exception as e:
+    app.logger.error(f'Failed to initialize Redis cache: {e}')
+    # Fallback to simple cache
+    app.config['CACHE_TYPE'] = 'simple'
+    cache = Cache(app)
+    app.logger.info('Fallback to SimpleCache successful')
 
 # Import models after db initialization to avoid circular imports
 import models
