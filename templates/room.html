@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whiteboard - Room</title>
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="whiteboard-container">
+            <div class="toolbar">
+                <input type="color" id="colorPicker" class="form-control form-control-color" value="#000000">
+                <input type="range" id="brushSize" min="1" max="20" value="2" class="form-range">
+                <button class="btn btn-danger" onclick="whiteboard.clear()">Clear</button>
+            </div>
+            <canvas id="whiteboard"></canvas>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/socket.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/whiteboard.js') }}"></script>
+    <script>
+        const socketManager = new SocketManager();
+        const whiteboard = new Whiteboard('whiteboard', socketManager, '{{ room_id }}');
+
+        document.getElementById('colorPicker').addEventListener('change', (e) => {
+            whiteboard.setColor(e.target.value);
+        });
+
+        document.getElementById('brushSize').addEventListener('input', (e) => {
+            whiteboard.setBrushSize(parseInt(e.target.value));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+.whiteboard-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+}
+
+.toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 10px;
+    background: var(--bs-gray-800);
+    border-radius: 5px;
+}
+
+.canvas-container {
+    border: 2px solid var(--bs-gray-700);
+    border-radius: 5px;
+    background: var(--bs-white);
+}
+
+.tool-button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}

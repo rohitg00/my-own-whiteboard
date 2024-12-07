@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whiteboard - Home</title>
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6 text-center">
+                <h1 class="mb-4">Welcome to Collaborative Whiteboard</h1>
+                <button class="btn btn-primary" onclick="createRoom()">Create New Room</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function createRoom() {
+            const roomId = Math.random().toString(36).substring(2, 15);
+            window.location.href = `/room/${roomId}`;
+        }
+    </script>
+</body>
+</html>
