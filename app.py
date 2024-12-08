@@ -169,36 +169,24 @@ def handle_draw(data):
     try:
         app.logger.info(f"Received draw event for room {room}")
         
-        # Store in database
-        path_data = json.dumps(data['path'])
+        # Store in database with proper serialization
+        path_data = json.dumps(data['path'], separators=(',', ':'))
         drawing = models.DrawingData(room_id=room, data=path_data)
         db.session.add(drawing)
         db.session.commit()
         
-        # Update cache with atomic operation and versioning
-        from cache_manager import get_cache_key, DRAWING_CACHE_TIMEOUT, prefetch_room_data
-        
-        cache_key = get_cache_key(f"drawing_data_{room}")
+        # Update cache atomically
+        cache_key = f"drawing_data_{room}"
         try:
-            # Get existing data with versioned key
             cached_data = cache.get(cache_key)
             drawing_list = json.loads(cached_data) if cached_data else []
             drawing_list.append(data['path'])
-            
-            # Update cache with proper timeout
-            cache.setex(cache_key, DRAWING_CACHE_TIMEOUT, json.dumps(drawing_list))
+            cache.setex(cache_key, 3600, json.dumps(drawing_list, separators=(',', ':')))
             app.logger.info(f"Successfully updated cache for room {room}")
-            
-            # Trigger prefetch for frequently accessed rooms
-            prefetch_room_data(room)
-        except redis.RedisError as e:
-            app.logger.error(f"Redis cache update failed: {e}")
-            # Continue execution even if cache fails
         except Exception as e:
-            app.logger.error(f"Unexpected error in cache update: {e}")
+            app.logger.error(f"Cache update failed: {e}")
         
-        # Broadcast to all clients in room except sender
-        app.logger.info(f"Broadcasting draw update to room {room}")
+        # Broadcast to room
         emit('draw_update', {
             'room': room,
             'path': data['path']

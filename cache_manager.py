@@ -2,6 +2,8 @@ from app import cache, app
 from functools import wraps
 import time
 import logging
+import json
+import redis
 from datetime import datetime
 
 CACHE_VERSION = "1.1"  # Increment version to invalidate old cache
@@ -110,7 +112,7 @@ def prefetch_room_data(room_id):
     pattern_key = f"access_pattern:{room_id}"
     try:
         pattern = cache.get(pattern_key)
-        if pattern and pattern.get('access_count', 0) > 10:
+        if pattern and pattern.get('access_count', 0) > PREFETCH_THRESHOLD:
             # Room is frequently accessed, prefetch related data
             app.logger.info(f"Prefetching data for frequently accessed room: {room_id}")
             
@@ -118,14 +120,21 @@ def prefetch_room_data(room_id):
             from models import DrawingData
             drawings = DrawingData.query.filter_by(room_id=room_id).all()
             if drawings:
-                drawing_data = [eval(d.data) for d in drawings]
-                cache_key = get_cache_key(f"drawing_data_{room_id}")
-                
-                @retry_with_backoff
-                def cache_drawings():
-                    cache.set(cache_key, drawing_data, timeout=600)  # 10 minutes
-                
-                cache_drawings()
-                app.logger.info(f"Successfully prefetched {len(drawing_data)} drawings for room {room_id}")
+                try:
+                    drawing_data = [json.loads(d.data) for d in drawings]
+                    cache_key = get_cache_key(f"drawing_data_{room_id}")
+                    
+                    @retry_with_backoff
+                    def cache_drawings():
+                        cache.setex(
+                            cache_key,
+                            DRAWING_CACHE_TIMEOUT,
+                            json.dumps(drawing_data, separators=(',', ':'))
+                        )
+                    
+                    cache_drawings()
+                    app.logger.info(f"Successfully prefetched {len(drawing_data)} drawings for room {room_id}")
+                except json.JSONDecodeError as e:
+                    app.logger.error(f"Error parsing drawing data during prefetch: {e}")
     except Exception as e:
         app.logger.warning(f"Failed to prefetch room data: {str(e)}")
