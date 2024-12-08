@@ -298,8 +298,33 @@ class Whiteboard {
         this.canvas.zoomToPoint(center, 1);
     }
     setupEventListeners() {
+        // Add viewport state tracking
+        this.viewportState = {
+            zoom: 1,
+            pan: { x: 0, y: 0 }
+        };
+
         this.socket.on('error', (error) => {
             console.error('Socket.IO error:', error);
+        });
+
+        // Update pointer coordinates calculation
+        this.canvas.on('mouse:move', (opt) => {
+            const pointer = this.canvas.getPointer(opt.e);
+            // Normalize coordinates relative to canvas bounds
+            const canvasRect = this.canvas.getElement().getBoundingClientRect();
+            const normalizedX = (pointer.x - canvasRect.left) / this.viewportState.zoom;
+            const normalizedY = (pointer.y - canvasRect.top) / this.viewportState.zoom;
+            
+            // Use normalized coordinates for drawing
+            if (this.isDrawing) {
+                // Update current path with normalized coordinates
+                const path = this.canvas.freeDrawingBrush._points;
+                if (path && path.length > 0) {
+                    path[path.length - 1].x = normalizedX;
+                    path[path.length - 1].y = normalizedY;
+                }
+            }
         });
 
         this.canvas.on('path:created', (e) => {
@@ -316,8 +341,16 @@ class Whiteboard {
             console.log('Received draw update:', data);
             if (data.room === this.roomId) {
                 try {
+                    const path = data.path;
+                    // Apply viewport transformations
+                    if (path.objects) {
+                        path.objects.forEach(obj => {
+                            obj.left = obj.left * this.viewportState.zoom + this.viewportState.pan.x;
+                            obj.top = obj.top * this.viewportState.zoom + this.viewportState.pan.y;
+                        });
+                    }
                     await new Promise(resolve => {
-                        fabric.util.enlivenObjects([data.path], (objects) => {
+                        fabric.util.enlivenObjects([path], (objects) => {
                             objects.forEach(obj => {
                                 console.log('Adding received object to canvas');
                                 this.canvas.add(obj);
@@ -330,6 +363,26 @@ class Whiteboard {
                 } catch (error) {
                     console.error('Error handling draw update:', error);
                 }
+            }
+        });
+
+        // Sync viewport state
+        this.canvas.on('zoom:changed', () => {
+            this.viewportState.zoom = this.canvas.getZoom();
+            this.socket.emit('viewport_update', {
+                room: this.roomId,
+                viewport: this.viewportState
+            });
+        });
+
+        this.socket.on('viewport_update', (data) => {
+            if (data.room === this.roomId) {
+                this.viewportState = data.viewport;
+                this.canvas.setZoom(data.viewport.zoom);
+                this.canvas.absolutePan(new fabric.Point(
+                    data.viewport.pan.x,
+                    data.viewport.pan.y
+                ));
             }
         });
 
