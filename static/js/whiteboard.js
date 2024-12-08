@@ -175,11 +175,14 @@ class Whiteboard {
             if (data.drawings && Array.isArray(data.drawings)) {
                 for (const path of data.drawings) {
                     if (path && typeof path === 'object') {
-                        fabric.util.enlivenObjects([path], (objects) => {
-                            objects.forEach(obj => {
-                                console.log('Adding object to canvas:', obj);
-                                this.canvas.add(obj);
+                        await new Promise(resolve => {
+                            fabric.util.enlivenObjects([path], (objects) => {
+                                objects.forEach(obj => {
+                                    this.canvas.add(obj);
+                                    this.history.push(obj);
+                                });
                                 this.canvas.renderAll();
+                                resolve();
                             });
                         });
                     }
@@ -207,13 +210,21 @@ class Whiteboard {
             }
         });
 
-        this.socket.on('draw_update', (data) => {
-            fabric.util.enlivenObjects([data.path], (objects) => {
-                objects.forEach(obj => {
-                    this.canvas.add(obj);
-                    this.canvas.renderAll();
+        this.socket.on('draw_update', async (data) => {
+            try {
+                await new Promise(resolve => {
+                    fabric.util.enlivenObjects([data.path], (objects) => {
+                        objects.forEach(obj => {
+                            this.canvas.add(obj);
+                            this.history.push(obj);
+                        });
+                        this.canvas.renderAll();
+                        resolve();
+                    });
                 });
-            });
+            } catch (error) {
+                console.error('Error handling draw update:', error);
+            }
         });
 
         this.socket.on('clear_board', () => {

@@ -11,32 +11,73 @@ app.config['SECRET_KEY'] = os.urandom(24)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///whiteboard.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Initialize Redis connection with error handling
-redis_url = os.getenv('REDIS_URL')
-try:
-    # Parse the Redis URL to handle authentication properly
-    cache = redis.from_url(redis_url, decode_responses=True)
-    # Test the connection
-    cache.ping()
-    app.logger.info("Successfully connected to Redis")
-except Exception as e:
-    app.logger.error(f"Failed to connect to Redis: {e}")
-    # Fallback to a simple in-memory cache
-    class SimpleCache:
-        def __init__(self):
-            self._cache = {}
-        def get(self, key):
-            return self._cache.get(key)
-        def set(self, key, value, *args, **kwargs):
-            self._cache[key] = value
-        def setex(self, key, time, value):
-            self._cache[key] = value
-        def delete(self, key):
-            self._cache.pop(key, None)
-        def ping(self):
+# Define SimpleCache as fallback
+class SimpleCache:
+    def __init__(self):
+        self._cache = {}
+        
+    def get(self, key):
+        return self._cache.get(key)
+        
+    def set(self, key, value, *args, **kwargs):
+        self._cache[key] = value
+        
+    def setex(self, key, time, value):
+        self._cache[key] = value
+        
+    def delete(self, key):
+        self._cache.pop(key, None)
+        
+    def ping(self):
+        return True
+
+def init_redis_connection(max_retries=3, retry_delay=1):
+    """Initialize Redis connection with retries"""
+    redis_url = os.getenv('REDIS_URL')
+    
+    if not redis_url:
+        app.logger.warning("No Redis URL provided, using in-memory cache")
+        return SimpleCache()
+        
+    for attempt in range(max_retries):
+        try:
+            # Ensure proper URL format
+            if not redis_url.startswith(('redis://', 'rediss://')):
+                redis_url = f"redis://{redis_url}"
+            
+            # Initialize connection
+            redis_client = redis.from_url(redis_url, decode_responses=True)
+            redis_client.ping()  # Test connection
+            
+            app.logger.info(f"Successfully connected to Redis (attempt {attempt + 1}/{max_retries})")
+            return redis_client
+            
+        except redis.ConnectionError as e:
+            app.logger.error(f"Redis connection error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                app.logger.warning("Max retries reached, falling back to in-memory cache")
+                return SimpleCache()
+                
+        except Exception as e:
+            app.logger.error(f"Unexpected Redis error: {e}")
+            return SimpleCache()
+
+# Initialize cache with retry mechanism
+cache = init_redis_connection()
+
+# Monitor cache health
+def check_cache_health():
+    """Periodic cache health check"""
+    try:
+        if isinstance(cache, redis.Redis):
+            cache.ping()
             return True
-    cache = SimpleCache()
-    app.logger.warning("Using in-memory cache as fallback")
+    except:
+        app.logger.error("Cache health check failed")
+        return False
+    return True
 
 # Initialize Flask-SocketIO
 socketio = SocketIO(app)
@@ -120,16 +161,15 @@ def handle_join(data):
 def handle_draw(data):
     room = data['room']
     try:
-        # Ensure path data is properly serialized
-        path_data = json.dumps(data['path'], separators=(',', ':'))
+        # Serialize path data with proper encoding
+        path_data = json.dumps(data['path'])
         
-        # Store in database first
+        # Store in database
         drawing = models.DrawingData(room_id=room, data=path_data)
         db.session.add(drawing)
         db.session.commit()
-        app.logger.info(f"Drawing saved to database for room {room}")
         
-        # Update cache with parsed data
+        # Update cache
         cache_key = f"drawing_data_{room}"
         cached_data = cache.get(cache_key)
         if cached_data:
@@ -139,13 +179,15 @@ def handle_draw(data):
         else:
             cache.setex(cache_key, 3600, json.dumps([data['path']]))
         
-        # Broadcast to room
-        socketio.emit('draw_update', data, room=room, skip_sid=request.sid)
+        # Broadcast to room with proper data structure
+        socketio.emit('draw_update', {
+            'room': room,
+            'path': data['path']
+        }, room=room, skip_sid=request.sid)
         
     except Exception as e:
         app.logger.error(f"Error saving drawing: {str(e)}")
         db.session.rollback()
-        socketio.emit('error', {'message': 'Failed to save drawing'}, room=request.sid)
 
 @socketio.on('undo')
 def handle_undo(data):

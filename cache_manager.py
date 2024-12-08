@@ -13,18 +13,25 @@ def get_cache_key(base_key, version=CACHE_VERSION):
     return f"{base_key}:v{version}"
 
 def retry_with_backoff(func):
-    """Retry decorator with exponential backoff"""
+    """Enhanced retry decorator with exponential backoff and Redis-specific error handling"""
     @wraps(func)
     def wrapper(*args, **kwargs):
         for attempt in range(MAX_RETRIES):
             try:
                 return func(*args, **kwargs)
-            except Exception as e:
+            except redis.ConnectionError as e:
                 if attempt == MAX_RETRIES - 1:
+                    app.logger.error(f"Redis connection failed after {MAX_RETRIES} attempts: {str(e)}")
                     raise
                 backoff = BASE_BACKOFF * (2 ** attempt)
-                app.logger.warning(f"Cache operation failed (attempt {attempt + 1}): {str(e)}. Retrying in {backoff}s")
+                app.logger.warning(f"Redis connection failed (attempt {attempt + 1}): {str(e)}. Retrying in {backoff}s")
                 time.sleep(backoff)
+            except redis.RedisError as e:
+                app.logger.error(f"Redis operation error: {str(e)}")
+                raise
+            except Exception as e:
+                app.logger.error(f"Unexpected cache error: {str(e)}")
+                raise
     return wrapper
 
 def log_cache_stats(func):
