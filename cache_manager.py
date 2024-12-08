@@ -1,16 +1,27 @@
-from app import cache, app
+from app import app
 from functools import wraps
 import time
 import logging
 import json
 import redis
 from datetime import datetime
+import os
 
+# Initialize Redis connection pool
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+redis_pool = redis.ConnectionPool.from_url(
+    REDIS_URL,
+    max_connections=10,
+    socket_timeout=5,
+    socket_connect_timeout=5,
+    retry_on_timeout=True
+)
+cache = redis.Redis(connection_pool=redis_pool, decode_responses=True)
+
+# Cache configuration
 CACHE_VERSION = "1.1"  # Increment version to invalidate old cache
 MAX_RETRIES = 3
 BASE_BACKOFF = 0.1  # 100ms
-
-# Cache configuration
 DRAWING_CACHE_TIMEOUT = 3600  # 1 hour
 ROOM_CACHE_TIMEOUT = 86400   # 24 hours
 USER_PRESENCE_TIMEOUT = 300  # 5 minutes
@@ -138,3 +149,74 @@ def prefetch_room_data(room_id):
                     app.logger.error(f"Error parsing drawing data during prefetch: {e}")
     except Exception as e:
         app.logger.warning(f"Failed to prefetch room data: {str(e)}")
+
+def cache_room_state(room_id, state_data, timeout=ROOM_CACHE_TIMEOUT):
+    """Cache room state including viewport and active users"""
+    try:
+        cache_key = get_cache_key(f"room_state_{room_id}")
+        cache.setex(
+            cache_key,
+            timeout,
+            json.dumps(state_data, separators=(',', ':'))
+        )
+        app.logger.info(f"Cached room state for room {room_id}")
+    except Exception as e:
+        app.logger.error(f"Failed to cache room state: {str(e)}")
+
+def get_room_state(room_id):
+    """Retrieve cached room state"""
+    try:
+        cache_key = get_cache_key(f"room_state_{room_id}")
+        data = cache.get(cache_key)
+        if data:
+            return json.loads(data)
+    except Exception as e:
+        app.logger.error(f"Failed to get room state: {str(e)}")
+    return None
+
+def track_user_presence(room_id, user_id, user_data):
+    """Track user presence in a room"""
+    try:
+        presence_key = get_cache_key(f"presence_{room_id}")
+        user_key = f"user:{user_id}"
+        
+        # Update user data in room
+        cache.hset(presence_key, user_key, json.dumps(user_data))
+        # Set expiration for user presence
+        cache.expire(presence_key, USER_PRESENCE_TIMEOUT)
+        
+        app.logger.info(f"Updated presence for user {user_id} in room {room_id}")
+    except Exception as e:
+        app.logger.error(f"Failed to track user presence: {str(e)}")
+
+def get_active_users(room_id):
+    """Get all active users in a room"""
+    try:
+        presence_key = get_cache_key(f"presence_{room_id}")
+        user_data = cache.hgetall(presence_key)
+        return {k: json.loads(v) for k, v in user_data.items()}
+    except Exception as e:
+        app.logger.error(f"Failed to get active users: {str(e)}")
+        return {}
+
+def invalidate_room_cache(room_id):
+    """Invalidate all cached data for a room"""
+    try:
+        # Get all keys for the room
+        room_pattern = get_cache_key(f"*_{room_id}")
+        keys = cache.keys(room_pattern)
+        
+        if keys:
+            cache.delete(*keys)
+            app.logger.info(f"Invalidated cache for room {room_id}")
+    except Exception as e:
+        app.logger.error(f"Failed to invalidate room cache: {str(e)}")
+
+def check_redis_connection():
+    """Check Redis connection health"""
+    try:
+        cache.ping()
+        return True
+    except redis.ConnectionError as e:
+        app.logger.error(f"Redis connection error: {str(e)}")
+        return False

@@ -1,4 +1,8 @@
 import os
+from datetime import datetime
+from flask import Flask, render_template, request, jsonify
+from flask_socketio import SocketIO, emit, join_room
+from cache_manager import check_redis_connection, cache
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room
 from flask_sqlalchemy import SQLAlchemy
@@ -94,6 +98,16 @@ room_users = {}
 
 # Import models after db initialization
 import models
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for k8s and monitoring"""
+    redis_status = check_redis_connection()
+    return jsonify({
+        'status': 'healthy' if redis_status else 'degraded',
+        'redis': 'connected' if redis_status else 'disconnected',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 200 if redis_status else 503
 
 @app.route('/')
 def index():

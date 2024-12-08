@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whiteboard-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: whiteboard
+  template:
+    metadata:
+      labels:
+        app: whiteboard
+    spec:
+      containers:
+      - name: whiteboard
+        image: whiteboard:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: redis-url
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 15
+          periodSeconds: 20
