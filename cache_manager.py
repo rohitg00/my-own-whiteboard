@@ -16,13 +16,15 @@ ROOM_CACHE_TIMEOUT = 86400   # 24 hours
 USER_PRESENCE_TIMEOUT = 300  # 5 minutes
 PREFETCH_THRESHOLD = 10      # Number of accesses before prefetching
 
-# Initialize Redis connection pool
+# Initialize Redis connection pool with optimized settings
 redis_pool = redis.ConnectionPool.from_url(
     REDIS_URL,
-    max_connections=10,
-    socket_timeout=5,
-    socket_connect_timeout=5,
-    retry_on_timeout=True
+    max_connections=20,
+    socket_timeout=2,
+    socket_connect_timeout=2,
+    retry_on_timeout=True,
+    decode_responses=True,
+    health_check_interval=30
 )
 
 redis_client = redis.Redis(connection_pool=redis_pool, decode_responses=True)
@@ -250,14 +252,19 @@ def cleanup_disconnected_users(room_id):
         logging.error(f"Failed to cleanup disconnected users: {str(e)}")
 
 @retry_with_backoff
-def cache_cursor_position(room_id, user_id, position_data, timeout=5):
-    """Cache cursor position with rate limiting"""
+def cache_cursor_position(room_id, user_id, position_data, timeout=2):
+    """Cache cursor position with rate limiting and proper connection handling"""
     try:
         cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
-        # Use shorter timeout for cursor positions
-        redis_client.setex(cursor_key, timeout, json.dumps(position_data))
+        with redis_client.pipeline(transaction=False) as pipe:
+            pipe.setex(cursor_key, timeout, json.dumps(position_data))
+            pipe.execute()
     except Exception as e:
         logging.error(f"Failed to cache cursor position: {str(e)}")
+    finally:
+        # Ensure connection is returned to pool
+        if hasattr(redis_client, 'connection'):
+            redis_client.connection_pool.release(redis_client.connection)
 
 @retry_with_backoff
 def get_cursor_positions(room_id):
