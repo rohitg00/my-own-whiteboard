@@ -6,7 +6,10 @@ import json
 import logging
 
 from extensions import db, socketio
-from cache_manager import cache, check_redis_connection
+from cache_manager import (
+    cache, check_redis_connection, cache_room_state,
+    track_user_presence, get_active_users, prefetch_room_data
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -94,16 +97,42 @@ def handle_join(data):
     room = data['room']
     join_room(room)
     
-    # Update user count with proper room tracking
-    if room not in room_users:
-        room_users[room] = set()
-    room_users[room].add(request.sid)
-    
-    # Broadcast user count to all clients in room
-    user_count = len(room_users[room])
-    socketio.emit('user_joined', {'count': user_count}, room=room)
-    
-    logger.info(f"Client {request.sid} joined room {room}, total users: {user_count}")
+    try:
+        # Update user count with proper room tracking
+        if room not in room_users:
+            room_users[room] = set()
+        room_users[room].add(request.sid)
+        user_count = len(room_users[room])
+        
+        # Track user presence in Redis
+        user_data = {
+            'sid': request.sid,
+            'joined_at': datetime.utcnow().isoformat(),
+            'user_name': data.get('userName', 'Anonymous')
+        }
+        track_user_presence(room, request.sid, user_data)
+        
+        # Cache room state
+        cache_room_state(room, {
+            'user_count': user_count,
+            'last_update': datetime.utcnow().isoformat()
+        })
+        
+        # Prefetch room data for frequently accessed rooms
+        prefetch_room_data(room)
+        
+        # Broadcast user count to all clients in room
+        socketio.emit('user_joined', {
+            'count': user_count,
+            'users': get_active_users(room)
+        }, room=room)
+        
+        logger.info(f"Client {request.sid} joined room {room}, total users: {user_count}")
+        
+    except Exception as e:
+        logger.error(f"Error in handle_join: {str(e)}")
+        # Ensure basic functionality even if caching fails
+        socketio.emit('user_joined', {'count': len(room_users.get(room, set()))}, room=room)
 
 @socketio.on('draw')
 def handle_draw(data):
@@ -179,6 +208,21 @@ def handle_cursor_move(data):
         'x': data['x'],
         'y': data['y']
     }, room=room, include_self=False)
+
+
+@socketio.on('viewport_update')
+def handle_viewport_update(data):
+    """Handle viewport updates and cache room state"""
+    room = data['room']
+    try:
+        from cache_manager import cache_room_state
+        cache_room_state(room, {
+            'viewport': data['viewport'],
+            'last_update': datetime.utcnow().isoformat()
+        })
+        emit('viewport_update', data, room=room, skip_sid=request.sid)
+    except Exception as e:
+        logger.error(f"Error caching viewport state: {e}")
 
 @socketio.on('clear')
 def handle_clear(data):
