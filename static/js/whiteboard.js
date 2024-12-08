@@ -30,6 +30,31 @@ class Whiteboard {
         this.socket.joinRoom(this.roomId);
     }
 
+    setupTools() {
+        // Initialize brush settings
+        this.canvas.freeDrawingBrush.width = 2;
+        this.canvas.freeDrawingBrush.color = '#000000';
+        
+        // Initialize drawing modes
+        this.modes = {
+            draw: this.initDrawMode.bind(this),
+            rect: this.initRectMode.bind(this),
+            circle: this.initCircleMode.bind(this)
+        };
+        this.setMode('draw');
+    }
+
+    setMode(mode) {
+        if (!this.modes[mode]) return;
+        this.currentMode = mode;
+        this.modes[mode]();
+        // Update UI to show active mode
+        document.querySelectorAll('.tool-group button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`button[onclick="whiteboard.setMode('${mode}')"]`).classList.add('active');
+    }
+
     updateCursor(data) {
         // Remove existing cursor if any
         const existingCursor = this.canvas.getObjects().find(
@@ -67,31 +92,6 @@ class Whiteboard {
         cursorGroup.addWithUpdate(text);
         this.canvas.add(cursorGroup);
         this.canvas.renderAll();
-    }
-
-    setupTools() {
-        // Initialize brush settings
-        this.canvas.freeDrawingBrush.width = 2;
-        this.canvas.freeDrawingBrush.color = '#000000';
-        
-        // Initialize drawing modes
-        this.modes = {
-            draw: this.initDrawMode.bind(this),
-            rect: this.initRectMode.bind(this),
-            circle: this.initCircleMode.bind(this)
-        };
-        this.setMode('draw');
-    }
-
-    setMode(mode) {
-        if (!this.modes[mode]) return;
-        this.currentMode = mode;
-        this.modes[mode]();
-        // Update UI to show active mode
-        document.querySelectorAll('.tool-group button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        document.querySelector(`button[onclick="whiteboard.setMode('${mode}')"]`).classList.add('active');
     }
 
     setupEventListeners() {
@@ -136,7 +136,6 @@ class Whiteboard {
 
         // Handle drawing updates
         this.canvas.on('path:created', (e) => {
-            console.log('Path created, emitting draw event');
             const path = e.path;
             this.history.push(path);
             this.socket.emit('draw', {
@@ -188,11 +187,6 @@ class Whiteboard {
         this.socket.on('clear_board', () => {
             this.canvas.clear();
         });
-
-        // Error handling
-        this.socket.on('error', (error) => {
-            console.error('Socket.IO error:', error);
-        });
     }
 
     initDrawMode() {
@@ -229,10 +223,8 @@ class Whiteboard {
             if (!this.isDrawing) return;
             const pointer = this.canvas.getPointer(o.e);
             
-            const width = Math.min(Math.abs(pointer.x - origX), 
-                this.canvas.getWidth() - Math.min(origX, pointer.x));
-            const height = Math.min(Math.abs(pointer.y - origY),
-                this.canvas.getHeight() - Math.min(origY, pointer.y));
+            const width = Math.abs(pointer.x - origX);
+            const height = Math.abs(pointer.y - origY);
             
             rect.set({
                 width: width,
@@ -279,18 +271,13 @@ class Whiteboard {
         this.canvas.on('mouse:move', (o) => {
             if (!this.isDrawing) return;
             const pointer = this.canvas.getPointer(o.e);
-            
-            const maxRadius = Math.min(
-                Math.abs(pointer.x - origX),
-                Math.abs(pointer.y - origY),
-                origX,
-                origY,
-                this.canvas.getWidth() - origX,
-                this.canvas.getHeight() - origY
-            );
+            const radius = Math.sqrt(
+                Math.pow(pointer.x - origX, 2) +
+                Math.pow(pointer.y - origY, 2)
+            ) / 2;
             
             circle.set({
-                radius: maxRadius / 2
+                radius: radius
             });
             this.canvas.renderAll();
         });
@@ -308,13 +295,10 @@ class Whiteboard {
 
     async loadExistingDrawings() {
         try {
-            console.log('Loading existing drawings...');
             const response = await fetch(`/room/${this.roomId}/drawings`);
             if (!response.ok) throw new Error('Failed to fetch drawings');
             
             const data = await response.json();
-            console.log('Received drawings:', data);
-            
             if (data.drawings && Array.isArray(data.drawings)) {
                 for (const path of data.drawings) {
                     if (path && typeof path === 'object') {
