@@ -14,11 +14,6 @@ class Whiteboard {
         this.currentMode = 'draw';
         this.isDrawing = false;
         this.cursors = new Map();
-        this.userColors = new Map();  // Store user colors
-        this.generateUserColor = () => {
-            const colors = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff', '#44ffff'];
-            return colors[Math.floor(Math.random() * colors.length)];
-        };
         
         // Initialize viewport state
         this.viewportState = {
@@ -71,17 +66,11 @@ class Whiteboard {
             this.canvas.remove(existingCursor);
         }
 
-        // Get or generate color for user
-        if (!this.userColors.has(data.userName)) {
-            this.userColors.set(data.userName, this.generateUserColor());
-        }
-        const userColor = this.userColors.get(data.userName);
-
-        // Create cursor triangle with user color
+        // Create cursor triangle
         const cursor = new fabric.Triangle({
             width: 20,
             height: 20,
-            fill: userColor,
+            fill: '#ff4444',
             stroke: '#000000',
             strokeWidth: 1,
             angle: 45,
@@ -93,7 +82,7 @@ class Whiteboard {
 
         // Create background for text with increased width
         const textBg = new fabric.Rect({
-            fill: userColor + '80',  // Add transparency
+            fill: 'rgba(0, 0, 0, 0.8)',
             width: 120,
             height: 30,
             rx: 15,
