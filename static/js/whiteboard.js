@@ -14,6 +14,10 @@ class Whiteboard {
         this.isDrawing = false;
         this.initResponsiveCanvas();
         this.setupTools();
+        
+        // Join room immediately after socket setup
+        this.socket.joinRoom(this.roomId);
+        
         this.setupEventListeners();
         this.loadExistingDrawings();
     }
@@ -200,31 +204,33 @@ class Whiteboard {
         });
 
         this.canvas.on('path:created', (e) => {
-            try {
-                const path = e.path.toJSON();
-                this.socket.emit('draw', {
-                    room: this.roomId,
-                    path: path
-                });
-            } catch (error) {
-                console.error('Error sending drawing:', error);
-            }
+            console.log('Path created, emitting draw event');
+            const path = e.path.toJSON();
+            this.socket.emit('draw', {
+                room: this.roomId,
+                path: path
+            });
+            this.history.push(e.path);
         });
 
         this.socket.on('draw_update', async (data) => {
-            try {
-                await new Promise(resolve => {
-                    fabric.util.enlivenObjects([data.path], (objects) => {
-                        objects.forEach(obj => {
-                            this.canvas.add(obj);
-                            this.history.push(obj);
+            console.log('Received draw update:', data);
+            if (data.room === this.roomId) {
+                try {
+                    await new Promise(resolve => {
+                        fabric.util.enlivenObjects([data.path], (objects) => {
+                            objects.forEach(obj => {
+                                console.log('Adding received object to canvas');
+                                this.canvas.add(obj);
+                                this.history.push(obj);
+                            });
+                            this.canvas.renderAll();
+                            resolve();
                         });
-                        this.canvas.renderAll();
-                        resolve();
                     });
-                });
-            } catch (error) {
-                console.error('Error handling draw update:', error);
+                } catch (error) {
+                    console.error('Error handling draw update:', error);
+                }
             }
         });
 

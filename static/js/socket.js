@@ -38,6 +38,7 @@ class SocketManager {
     }
 
     joinRoom(roomId) {
+        console.log('Joining room:', roomId);
         this.lastRoom = roomId;
         this.socket.emit('join', { room: roomId });
     }

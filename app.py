@@ -150,10 +150,10 @@ def handle_join(data):
 def handle_draw(data):
     room = data['room']
     try:
-        # Serialize path data
-        path_data = json.dumps(data['path'])
+        app.logger.info(f"Received draw event for room {room}")
         
         # Store in database
+        path_data = json.dumps(data['path'])
         drawing = models.DrawingData(room_id=room, data=path_data)
         db.session.add(drawing)
         db.session.commit()
@@ -165,17 +165,19 @@ def handle_draw(data):
             drawing_list = json.loads(cached_data) if cached_data else []
             drawing_list.append(data['path'])
             cache.setex(cache_key, 3600, json.dumps(drawing_list))
+            app.logger.info(f"Successfully updated cache for room {room}")
         except Exception as e:
             app.logger.error(f"Cache update failed: {e}")
         
-        # Broadcast to room
-        socketio.emit('draw_update', {
+        # Broadcast to all clients in room except sender
+        app.logger.info(f"Broadcasting draw update to room {room}")
+        emit('draw_update', {
             'room': room,
             'path': data['path']
-        }, room=room, skip_sid=request.sid)
+        }, room=room, include_self=False)
         
     except Exception as e:
-        app.logger.error(f"Error saving drawing: {str(e)}")
+        app.logger.error(f"Error handling draw event: {e}")
         db.session.rollback()
 
 @socketio.on('disconnect')
