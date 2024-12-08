@@ -268,10 +268,10 @@ class Whiteboard {
 
     initRectMode() {
         this.canvas.isDrawingMode = false;
-        let rect, origX, origY;
+        let rect, origX, origY, isDown;
         
         this.canvas.on('mouse:down', (o) => {
-            this.isDrawing = true;
+            isDown = true;
             const pointer = this.canvas.getPointer(o.e);
             origX = pointer.x;
             origY = pointer.y;
@@ -284,29 +284,36 @@ class Whiteboard {
                 fill: 'transparent',
                 stroke: this.canvas.freeDrawingBrush.color,
                 strokeWidth: this.canvas.freeDrawingBrush.width,
-                selectable: false
+                selectable: false,
+                evented: false,
+                originX: 'left',
+                originY: 'top'
             });
+            
             this.canvas.add(rect);
+            this.canvas.renderAll();
         });
 
         this.canvas.on('mouse:move', (o) => {
-            if (!this.isDrawing) return;
+            if (!isDown) return;
             const pointer = this.canvas.getPointer(o.e);
             
-            const width = Math.abs(pointer.x - origX);
-            const height = Math.abs(pointer.y - origY);
+            const width = Math.abs(origX - pointer.x);
+            const height = Math.abs(origY - pointer.y);
             
             rect.set({
-                width: width,
-                height: height,
                 left: Math.min(origX, pointer.x),
-                top: Math.min(origY, pointer.y)
+                top: Math.min(origY, pointer.y),
+                width: width,
+                height: height
             });
+            
             this.canvas.renderAll();
         });
 
         this.canvas.on('mouse:up', () => {
-            this.isDrawing = false;
+            isDown = false;
+            rect.setCoords();  // Update coordinates
             this.history.push(rect);
             this.redoStack = [];
             this.socket.emit('draw', {
@@ -318,10 +325,10 @@ class Whiteboard {
 
     initCircleMode() {
         this.canvas.isDrawingMode = false;
-        let circle, origX, origY;
+        let circle, origX, origY, isDown;
         
         this.canvas.on('mouse:down', (o) => {
-            this.isDrawing = true;
+            isDown = true;
             const pointer = this.canvas.getPointer(o.e);
             origX = pointer.x;
             origY = pointer.y;
@@ -333,27 +340,39 @@ class Whiteboard {
                 fill: 'transparent',
                 stroke: this.canvas.freeDrawingBrush.color,
                 strokeWidth: this.canvas.freeDrawingBrush.width,
-                selectable: false
+                selectable: false,
+                evented: false,
+                originX: 'center',
+                originY: 'center'
             });
+            
             this.canvas.add(circle);
+            this.canvas.renderAll();
         });
 
         this.canvas.on('mouse:move', (o) => {
-            if (!this.isDrawing) return;
+            if (!isDown) return;
             const pointer = this.canvas.getPointer(o.e);
             const radius = Math.sqrt(
                 Math.pow(pointer.x - origX, 2) +
                 Math.pow(pointer.y - origY, 2)
             ) / 2;
             
+            const centerX = (origX + pointer.x) / 2;
+            const centerY = (origY + pointer.y) / 2;
+            
             circle.set({
+                left: centerX,
+                top: centerY,
                 radius: radius
             });
+            
             this.canvas.renderAll();
         });
 
         this.canvas.on('mouse:up', () => {
-            this.isDrawing = false;
+            isDown = false;
+            circle.setCoords();  // Update coordinates
             this.history.push(circle);
             this.redoStack = [];
             this.socket.emit('draw', {
