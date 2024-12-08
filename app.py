@@ -33,40 +33,57 @@ class SimpleCache:
         return True
 
 def init_redis_connection(max_retries=3, retry_delay=1):
-    """Initialize Redis connection with retries"""
     redis_url = os.getenv('REDIS_URL')
     
     if not redis_url:
         app.logger.warning("No Redis URL provided, using in-memory cache")
         return SimpleCache()
+    
+    try:
+        # Ensure proper URL format with retries
+        if not redis_url.startswith(('redis://', 'rediss://')):
+            redis_url = f"redis://{redis_url}"
         
-    for attempt in range(max_retries):
-        try:
-            # Ensure proper URL format
-            if not redis_url.startswith(('redis://', 'rediss://')):
-                redis_url = f"redis://{redis_url}"
-            
-            # Initialize connection
-            redis_client = redis.from_url(redis_url, decode_responses=True)
-            redis_client.ping()  # Test connection
-            
-            app.logger.info(f"Successfully connected to Redis (attempt {attempt + 1}/{max_retries})")
-            return redis_client
-            
-        except redis.ConnectionError as e:
-            app.logger.error(f"Redis connection error (attempt {attempt + 1}/{max_retries}): {e}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-            else:
-                app.logger.warning("Max retries reached, falling back to in-memory cache")
-                return SimpleCache()
-                
-        except Exception as e:
-            app.logger.error(f"Unexpected Redis error: {e}")
-            return SimpleCache()
+        # Configure Redis with proper options
+        redis_client = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_timeout=5,
+            retry_on_timeout=True,
+            health_check_interval=30
+        )
+        
+        # Test connection
+        redis_client.ping()
+        app.logger.info("Successfully connected to Redis")
+        return redis_client
+        
+    except redis.ConnectionError as e:
+        app.logger.error(f"Redis connection error: {e}")
+        return SimpleCache()
+    except Exception as e:
+        app.logger.error(f"Unexpected Redis error: {e}")
+        return SimpleCache()
 
 # Initialize cache with retry mechanism
 cache = init_redis_connection()
+
+def check_redis_health():
+    try:
+        if hasattr(cache, 'ping'):
+            cache.ping()
+            return True
+        return False
+    except:
+        return False
+
+# Add periodic health check
+@app.before_request
+def check_cache_health():
+    if not check_redis_health():
+        app.logger.warning("Redis health check failed, reinitializing connection")
+        global cache
+        cache = init_redis_connection()
 
 # Initialize Flask-SocketIO
 socketio = SocketIO(app)
