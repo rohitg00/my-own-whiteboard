@@ -35,6 +35,7 @@ class Whiteboard {
         this.initResponsiveCanvas();
         this.setupTools();
         this.setupEventListeners();
+        this.setupKeyboardShortcuts();
         this.loadExistingDrawings();
         
         // Join room immediately after socket setup
@@ -463,5 +464,60 @@ class Whiteboard {
                 objectData: restored.toJSON()
             });
         }
+    setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            // Check for platform (Mac vs Windows)
+            const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+            const cmdKey = isMac ? e.metaKey : e.ctrlKey;
+
+            if (cmdKey) {
+                switch(e.key.toLowerCase()) {
+                    case 'z':
+                        if (e.shiftKey) {
+                            this.redo();
+                        } else {
+                            this.undo();
+                        }
+                        e.preventDefault();
+                        break;
+                    case 'y':
+                        this.redo();
+                        e.preventDefault();
+                        break;
+                    case 'x':
+                        if (e.shiftKey && e.altKey) {
+                            this.clear();
+                        }
+                        e.preventDefault();
+                        break;
+                }
+            }
+            
+            // Arrow key handling for selected objects
+            if (e.key.startsWith('Arrow')) {
+                const obj = this.canvas.getActiveObject();
+                if (obj) {
+                    const MOVE_AMOUNT = 1;
+                    switch(e.key) {
+                        case 'ArrowUp':
+                            obj.top -= MOVE_AMOUNT;
+                            break;
+                        case 'ArrowDown':
+                            obj.top += MOVE_AMOUNT;
+                            break;
+                        case 'ArrowLeft':
+                            obj.left -= MOVE_AMOUNT;
+                            break;
+                        case 'ArrowRight':
+                            obj.left += MOVE_AMOUNT;
+                            break;
+                    }
+                    obj.setCoords();
+                    this.canvas.renderAll();
+                    e.preventDefault();
+                }
+            }
+        });
+    }
     }
 }
