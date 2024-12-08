@@ -215,12 +215,18 @@ def handle_disconnect():
 @socketio.on('undo')
 def handle_undo(data):
     room = data['room']
-    socketio.emit('undo_update', data, room=room, skip_sid=request.sid)
+    socketio.emit('undo_update', {
+        'room': room,
+        'objectData': data.get('objectData')
+    }, room=room, skip_sid=request.sid)
 
 @socketio.on('redo')
 def handle_redo(data):
     room = data['room']
-    socketio.emit('redo_update', data, room=room, skip_sid=request.sid)
+    socketio.emit('redo_update', {
+        'room': room,
+        'objectData': data.get('objectData')
+    }, room=room, skip_sid=request.sid)
 
 @socketio.on('clear')
 def handle_clear(data):

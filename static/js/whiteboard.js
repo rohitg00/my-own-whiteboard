@@ -337,6 +337,30 @@ class Whiteboard {
             console.error('Socket.IO error:', error);
         });
 
+        // Add undo handler
+        this.socket.on('undo_update', (data) => {
+            if (data.room === this.roomId) {
+                if (this.history.length > 0) {
+                    const removed = this.history.pop();
+                    this.redoStack.push(removed);
+                    this.canvas.remove(removed);
+                    this.canvas.renderAll();
+                }
+            }
+        });
+
+        // Add redo handler
+        this.socket.on('redo_update', (data) => {
+            if (data.room === this.roomId) {
+                if (this.redoStack.length > 0) {
+                    const restored = this.redoStack.pop();
+                    this.history.push(restored);
+                    this.canvas.add(restored);
+                    this.canvas.renderAll();
+                }
+            }
+        });
+
         this.canvas.on('mouse:move', (opt) => {
             if (!this.isDrawing) return;
             const pointer = this.canvas.getPointer(opt.e);
@@ -461,7 +485,10 @@ class Whiteboard {
             this.redoStack.push(removed);
             this.canvas.remove(removed);
             this.canvas.renderAll();
-            this.socket.emit('undo', { room: this.roomId });
+            this.socket.emit('undo', { 
+                room: this.roomId,
+                objectData: removed.toJSON()
+            });
         }
     }
 
@@ -471,7 +498,10 @@ class Whiteboard {
             this.history.push(restored);
             this.canvas.add(restored);
             this.canvas.renderAll();
-            this.socket.emit('redo', { room: this.roomId });
+            this.socket.emit('redo', { 
+                room: this.roomId,
+                objectData: restored.toJSON()
+            });
         }
     }
 }
