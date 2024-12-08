@@ -18,9 +18,37 @@ DRAWING_CACHE_TIMEOUT = 3600  # 1 hour
 ROOM_CACHE_TIMEOUT = 86400   # 24 hours
 PREFETCH_THRESHOLD = 10      # Number of accesses before prefetching
 
-# Configure Redis connection
+# Configure Redis connection with pooling
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-redis_client = redis.from_url(REDIS_URL)
+REDIS_POOL = redis.ConnectionPool.from_url(
+    REDIS_URL,
+    max_connections=10,
+    socket_timeout=5,
+    socket_connect_timeout=5,
+    retry_on_timeout=True,
+    decode_responses=True
+)
+redis_client = redis.Redis(connection_pool=REDIS_POOL)
+
+# Configure error handling
+def handle_redis_error(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except redis.ConnectionError as e:
+            logging.error(f"Redis connection error: {str(e)}")
+            return None
+        except redis.RedisError as e:
+            if "max number of clients reached" in str(e):
+                logging.error("Redis max clients reached, implementing backoff...")
+                time.sleep(1)  # Basic backoff
+                try:
+                    return func(*args, **kwargs)
+                except Exception as retry_e:
+                    logging.error(f"Retry failed: {str(retry_e)}")
+            return None
+    return wrapper
 
 # Initialize circuit breaker
 cache_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=60)
@@ -161,16 +189,28 @@ def prefetch_room_data(room_id):
     except Exception as e:
         logging.warning(f"Failed to prefetch room data: {str(e)}")
 
-@retry_with_backoff
+@handle_redis_error
 def cache_cursor_position(room_id, user_id, position_data, timeout=5):
-    """Cache single cursor position with debouncing"""
+    """Cache single cursor position with debouncing and error handling"""
+    cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
+    position_data['timestamp'] = datetime.utcnow().isoformat()
+    
+    # Use pipeline for atomic operations
+    pipe = redis_client.pipeline()
     try:
-        cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
-        # Add timestamp for cursor expiration
-        position_data['timestamp'] = datetime.utcnow().isoformat()
-        redis_client.setex(cursor_key, timeout, json.dumps(position_data))
-    except Exception as e:
+        # Set cursor position with expiration
+        pipe.setex(cursor_key, timeout, json.dumps(position_data))
+        
+        # Track cursor update frequency
+        frequency_key = get_cache_key(f"cursor_frequency_{room_id}_{user_id}")
+        pipe.incr(frequency_key)
+        pipe.expire(frequency_key, 60)  # Reset counter after 60 seconds
+        
+        pipe.execute()
+        return True
+    except redis.RedisError as e:
         logging.error(f"Failed to cache cursor position: {str(e)}")
+        return False
 
 @retry_with_backoff
 def cleanup_disconnected_users(room_id):
