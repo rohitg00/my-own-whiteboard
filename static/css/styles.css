@@ -47,3 +47,35 @@
     border-radius: 4px;
     cursor: pointer;
 }
+
+.brush-size-wrapper {
+    background: rgba(128, 128, 128, 0.2);
+    padding: 15px;
+    border-radius: 10px;
+    margin: 0 15px;
+}
+
+.custom-range {
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #444, #888);
+    cursor: pointer;
+}
+
+.custom-range::-webkit-slider-thumb {
+    background: #666;
+    border: 2px solid #444;
+    height: 20px;
+    width: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.brush-size-preview {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #666;
+    margin: 8px auto;
+    border: 2px solid #444;
+}

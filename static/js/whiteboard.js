@@ -66,6 +66,14 @@ class Whiteboard {
         document.querySelector(`button[onclick="whiteboard.setMode('${mode}')"]`).classList.add('active');
     }
 
+    getUserColor(userName) {
+        if (!this.userColors.has(userName)) {
+            const colorIndex = this.userColors.size % this.colorPalette.length;
+            this.userColors.set(userName, this.colorPalette[colorIndex]);
+        }
+        return this.userColors.get(userName);
+    }
+
     updateCursor(data) {
         console.log('Updating cursor for:', data.userName);
         
@@ -77,11 +85,14 @@ class Whiteboard {
             this.canvas.remove(existingCursor);
         }
 
+        // Get user's unique color
+        const userColor = this.getUserColor(data.userName);
+
         // Create cursor triangle
         const cursor = new fabric.Triangle({
             width: 20,
             height: 20,
-            fill: '#ff4444',
+            fill: userColor,
             stroke: '#000000',
             strokeWidth: 1,
             angle: 45,
@@ -93,7 +104,7 @@ class Whiteboard {
 
         // Create background for text with increased width
         const textBg = new fabric.Rect({
-            fill: 'rgba(0, 0, 0, 0.8)',
+            fill: `${userColor}CC`,  // Add transparency to user color
             width: 120,
             height: 30,
             rx: 15,
@@ -148,10 +159,10 @@ class Whiteboard {
     }
 
     setupEventListeners() {
-        // Add cursor tracking with improved throttling
+        // Add cursor tracking with optimized throttling
         let lastEmit = 0;
-        const THROTTLE_INTERVAL = 30; // Reduce from 50ms to 30ms
-        const BATCH_SIZE = 5; // Add batch processing
+        const THROTTLE_INTERVAL = 50; // Increased for better performance
+        const BATCH_SIZE = 10; // Increased batch size for optimization
         let cursorUpdates = [];
         
         this.canvas.on('mouse:move', (opt) => {
