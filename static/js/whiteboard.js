@@ -61,8 +61,9 @@ class Whiteboard {
         this.canvas.on('mouse:down', (o) => {
             this.isDrawing = true;
             const pointer = this.canvas.getPointer(o.e);
-            origX = pointer.x;
-            origY = pointer.y;
+            const constrained = this.constrainToBoundary(pointer);
+            origX = constrained.x;
+            origY = constrained.y;
             rect = new fabric.Rect({
                 left: origX,
                 top: origY,
@@ -78,11 +79,13 @@ class Whiteboard {
         this.canvas.on('mouse:move', (o) => {
             if (!this.isDrawing) return;
             const pointer = this.canvas.getPointer(o.e);
+            const constrained = this.constrainToBoundary(pointer);
+            
             rect.set({
-                width: Math.abs(pointer.x - origX),
-                height: Math.abs(pointer.y - origY),
-                left: Math.min(origX, pointer.x),
-                top: Math.min(origY, pointer.y)
+                width: Math.abs(constrained.x - origX),
+                height: Math.abs(constrained.y - origY),
+                left: Math.min(origX, constrained.x),
+                top: Math.min(origY, constrained.y)
             });
             this.canvas.renderAll();
         });
@@ -105,8 +108,9 @@ class Whiteboard {
         this.canvas.on('mouse:down', (o) => {
             this.isDrawing = true;
             const pointer = this.canvas.getPointer(o.e);
-            origX = pointer.x;
-            origY = pointer.y;
+            const constrained = this.constrainToBoundary(pointer);
+            origX = constrained.x;
+            origY = constrained.y;
             circle = new fabric.Circle({
                 left: origX,
                 top: origY,
@@ -121,7 +125,8 @@ class Whiteboard {
         this.canvas.on('mouse:move', (o) => {
             if (!this.isDrawing) return;
             const pointer = this.canvas.getPointer(o.e);
-            const radius = Math.sqrt(Math.pow(pointer.x - origX, 2) + Math.pow(pointer.y - origY, 2)) / 2;
+            const constrained = this.constrainToBoundary(pointer);
+            const radius = Math.sqrt(Math.pow(constrained.x - origX, 2) + Math.pow(constrained.y - origY, 2)) / 2;
             circle.set({
                 radius: radius,
                 left: origX - radius,
@@ -297,6 +302,15 @@ class Whiteboard {
         );
         this.canvas.zoomToPoint(center, 1);
     }
+    constrainToBoundary(point) {
+        const width = this.canvas.getWidth();
+        const height = this.canvas.getHeight();
+        return {
+            x: Math.min(Math.max(point.x, 0), width),
+            y: Math.min(Math.max(point.y, 0), height)
+        };
+    }
+
     setupEventListeners() {
         // Add viewport state tracking
         this.viewportState = {
@@ -329,12 +343,27 @@ class Whiteboard {
 
         this.canvas.on('path:created', (e) => {
             console.log('Path created, emitting draw event');
-            const path = e.path.toJSON();
+            const path = e.path;
+            const points = path.path;
+            
+            // Constrain all points to canvas boundaries
+            if (points) {
+                points.forEach(point => {
+                    if (point[0] !== 'M' && point[0] !== 'L' && point[0] !== 'Q') return;
+                    const constrained = this.constrainToBoundary({
+                        x: point[point.length - 2],
+                        y: point[point.length - 1]
+                    });
+                    point[point.length - 2] = constrained.x;
+                    point[point.length - 1] = constrained.y;
+                });
+            }
+            
+            this.history.push(path);
             this.socket.emit('draw', {
                 room: this.roomId,
-                path: path
+                path: path.toJSON()
             });
-            this.history.push(e.path);
         });
 
         this.socket.on('draw_update', async (data) => {
