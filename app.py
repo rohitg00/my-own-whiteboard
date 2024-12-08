@@ -4,6 +4,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_caching import Cache
 import os
 import logging
+import time
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -14,35 +16,60 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///whiteboard.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Redis Cache Configuration
-app.config['CACHE_TYPE'] = 'redis'
 redis_url = os.environ.get('REDIS_URL')
-if redis_url and not redis_url.startswith(('redis://', 'rediss://', 'unix://')):
-    redis_url = f"redis://{redis_url}"
-app.config['CACHE_REDIS_URL'] = redis_url
-app.config['CACHE_DEFAULT_TIMEOUT'] = 300 if redis_url else None
+cache_config = {
+    'CACHE_DEFAULT_TIMEOUT': 300
+}
 
-if not redis_url:
-    # Fallback to simple cache if Redis URL not available
-    app.config['CACHE_TYPE'] = 'simple'
+if redis_url:
+    try:
+        # Parse Redis URL to extract authentication
+        from urllib.parse import urlparse, parse_qs
+        parsed_url = urlparse(redis_url)
+        
+        # Ensure URL has proper format and authentication
+        if not redis_url.startswith(('redis://', 'rediss://')):
+            redis_url = f"redis://{redis_url}"
+        
+        cache_config.update({
+            'CACHE_TYPE': 'redis',
+            'CACHE_REDIS_URL': redis_url
+        })
+        
+        # Initialize cache
+        app.config.update(cache_config)
+        cache = Cache(app)
+        
+        # Test connection with retry
+        for attempt in range(3):
+            try:
+                cache.set('test_key', 'test_value')
+                test_value = cache.get('test_key')
+                if test_value == 'test_value':
+                    app.logger.info('Redis cache initialized successfully')
+                    break
+            except Exception as e:
+                app.logger.error(f'Redis connection attempt {attempt + 1} failed: {str(e)}')
+                if attempt < 2:  # Don't sleep on last attempt
+                    time.sleep(1)
+        else:
+            raise Exception("Failed to connect to Redis after 3 attempts")
+            
+    except Exception as e:
+        app.logger.error(f'Redis initialization failed: {str(e)}')
+        app.logger.warning('Falling back to SimpleCache')
+        cache_config['CACHE_TYPE'] = 'simple'
+        app.config.update(cache_config)
+        cache = Cache(app)
+else:
     app.logger.warning('Redis URL not found, falling back to SimpleCache')
+    cache_config['CACHE_TYPE'] = 'simple'
+    app.config.update(cache_config)
+    cache = Cache(app)
 
 # Initialize extensions
 socketio = SocketIO(app)
 db = SQLAlchemy(app)
-
-# Initialize cache with error handling
-try:
-    cache = Cache(app)
-    # Test cache connection
-    cache.set('test_key', 'test_value')
-    cache.get('test_key')
-    app.logger.info('Redis cache initialized successfully')
-except Exception as e:
-    app.logger.error(f'Failed to initialize Redis cache: {e}')
-    # Fallback to simple cache
-    app.config['CACHE_TYPE'] = 'simple'
-    cache = Cache(app)
-    app.logger.info('Fallback to SimpleCache successful')
 
 # Import models after db initialization to avoid circular imports
 import models
@@ -94,19 +121,23 @@ def handle_join(data):
 def handle_draw(data):
     room = data['room']
     try:
-        # Store drawing data in database
-        drawing = models.DrawingData(room_id=room, data=str(data['path']))
+        # Ensure data is properly serialized
+        path_data = json.dumps(data['path'])
+        
+        # Store in database
+        drawing = models.DrawingData(room_id=room, data=path_data)
         db.session.add(drawing)
         db.session.commit()
         
-        # Update cache
+        # Update cache with serialized data
         cache_key = f"drawing_data_{room}"
         cached_data = cache.get(cache_key) or []
-        cached_data.append(data['path'])
+        cached_data.append(json.loads(path_data))  # Store as parsed JSON
         cache.set(cache_key, cached_data)
         
         # Broadcast to room
         socketio.emit('draw_update', data, room=room, skip_sid=request.sid)
+        
     except Exception as e:
         app.logger.error(f"Error saving drawing: {e}")
         db.session.rollback()

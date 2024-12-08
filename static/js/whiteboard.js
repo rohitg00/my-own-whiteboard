@@ -30,18 +30,33 @@ class Whiteboard {
         const container = document.querySelector('.whiteboard-container');
         const containerWidth = container.clientWidth;
         const containerHeight = window.innerHeight * 0.8;
-
-        // Set canvas size based on container
-        this.canvas.setWidth(containerWidth - 40); // 40px padding
-        this.canvas.setHeight(containerHeight);
         
-        // Scale objects if needed
-        const scale = containerWidth / this.canvas.getWidth();
-        const objects = this.canvas.getObjects();
-        objects.forEach(obj => {
-            obj.scale(scale);
-        });
+        // Store original dimensions if not set
+        if (!this.originalWidth) {
+            this.originalWidth = this.canvas.width;
+            this.originalHeight = this.canvas.height;
+        }
         
+        // Calculate new dimensions maintaining aspect ratio
+        const aspectRatio = this.originalWidth / this.originalHeight;
+        let newWidth = containerWidth - 40;
+        let newHeight = containerHeight;
+        
+        if (newWidth / newHeight > aspectRatio) {
+            newWidth = newHeight * aspectRatio;
+        } else {
+            newHeight = newWidth / aspectRatio;
+        }
+        
+        // Set new dimensions
+        this.canvas.setWidth(newWidth);
+        this.canvas.setHeight(newHeight);
+        
+        // Calculate and apply scale factor
+        const scaleX = newWidth / this.originalWidth;
+        const scaleY = newHeight / this.originalHeight;
+        
+        this.canvas.setZoom(Math.min(scaleX, scaleY));
         this.canvas.renderAll();
     }
 
