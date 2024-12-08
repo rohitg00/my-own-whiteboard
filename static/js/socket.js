@@ -54,7 +54,12 @@ class SocketManager {
 
     emit(event, data) {
         try {
-            this.socket.emit(event, data);
+            // Always include userName in events
+            const dataWithUser = {
+                ...data,
+                userName: this.userName
+            };
+            this.socket.emit(event, dataWithUser);
         } catch (error) {
             console.error('Error emitting event:', error);
         }

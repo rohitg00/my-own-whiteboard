@@ -64,28 +64,34 @@ class Whiteboard {
             this.canvas.remove(existingCursor);
         }
 
-        // Create new cursor group
+        // Create cursor group
         const cursorGroup = new fabric.Group([], {
             left: data.x,
             top: data.y,
             selectable: false,
+            evented: false,
             id: `cursor_${data.userName}`
         });
 
-        // Add cursor pointer
+        // Add cursor pointer (make it more visible)
         const cursor = new fabric.Triangle({
-            width: 10,
-            height: 10,
-            fill: '#ff0000',
-            angle: 45
+            width: 15,
+            height: 15,
+            fill: '#ff4444',
+            angle: 45,
+            originX: 'center',
+            originY: 'center'
         });
 
-        // Add username text
-        const text = new fabric.Text(data.userName, {
-            fontSize: 12,
-            fill: '#ff0000',
+        // Add username text with better visibility
+        const text = new fabric.Text(data.userName || 'Anonymous', {
+            fontSize: 14,
+            fill: '#ff4444',
+            backgroundColor: 'rgba(0,0,0,0.4)',
             left: 10,
-            top: -15
+            top: -20,
+            originX: 'left',
+            originY: 'bottom'
         });
 
         cursorGroup.addWithUpdate(cursor);
@@ -95,15 +101,21 @@ class Whiteboard {
     }
 
     setupEventListeners() {
-        // Add cursor tracking
+        // Add cursor tracking with throttling
+        let lastEmit = 0;
+        const EMIT_INTERVAL = 50; // 50ms throttle
+        
         this.canvas.on('mouse:move', (opt) => {
-            const pointer = this.canvas.getPointer(opt.e);
-            this.socket.emit('cursor_move', {
-                room: this.roomId,
-                userName: this.socket.userName,
-                x: pointer.x,
-                y: pointer.y
-            });
+            const now = Date.now();
+            if (now - lastEmit > EMIT_INTERVAL) {
+                const pointer = this.canvas.getPointer(opt.e);
+                this.socket.emit('cursor_move', {
+                    room: this.roomId,
+                    x: pointer.x,
+                    y: pointer.y
+                });
+                lastEmit = now;
+            }
         });
 
         // Handle other users' cursors

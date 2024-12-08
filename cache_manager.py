@@ -179,17 +179,27 @@ def get_room_state(room_id):
 
 @retry_with_backoff
 def track_user_presence(room_id, user_id, user_data):
-    """Track user presence in a room"""
+    """Track user presence in a room with cursor position caching"""
     try:
         presence_key = get_cache_key(f"presence_{room_id}")
-        user_key = f"user:{user_id}"
+        user_key = str(user_id)  # Ensure key is string
         
-        # Update user data in room
-        redis_client.hset(presence_key, user_key, json.dumps(user_data))
-        # Set expiration for user presence
-        redis_client.expire(presence_key, USER_PRESENCE_TIMEOUT)
+        # Add timestamp to user data for cleanup
+        user_data['last_seen'] = datetime.utcnow().isoformat()
+        
+        # Serialize user data
+        serialized_data = json.dumps(user_data)
+        
+        # Update user data in room with pipeline for atomicity
+        pipe = redis_client.pipeline()
+        pipe.hset(presence_key, user_key, serialized_data)
+        pipe.expire(presence_key, USER_PRESENCE_TIMEOUT)
+        pipe.execute()
         
         logging.info(f"Updated presence for user {user_id} in room {room_id}")
+        
+        # Cleanup disconnected users periodically
+        cleanup_disconnected_users(room_id)
     except Exception as e:
         logging.error(f"Failed to track user presence: {str(e)}")
 
@@ -199,7 +209,12 @@ def get_active_users(room_id):
     try:
         presence_key = get_cache_key(f"presence_{room_id}")
         user_data = redis_client.hgetall(presence_key)
-        return {k: json.loads(v) for k, v in user_data.items()}
+        # Decode bytes to string if needed and parse JSON
+        return {
+            k.decode('utf-8') if isinstance(k, bytes) else k: 
+            json.loads(v.decode('utf-8') if isinstance(v, bytes) else v)
+            for k, v in user_data.items()
+        }
     except Exception as e:
         logging.error(f"Failed to get active users: {str(e)}")
         return {}
@@ -217,6 +232,50 @@ def invalidate_room_cache(room_id):
             logging.info(f"Invalidated cache for room {room_id}")
     except Exception as e:
         logging.error(f"Failed to invalidate room cache: {str(e)}")
+@retry_with_backoff
+def cleanup_disconnected_users(room_id):
+    """Remove users who haven't updated their presence recently"""
+    try:
+        presence_key = get_cache_key(f"presence_{room_id}")
+        now = datetime.utcnow()
+        users = get_active_users(room_id)
+        
+        pipe = redis_client.pipeline()
+        for user_id, data in users.items():
+            last_seen = datetime.fromisoformat(data.get('last_seen', '2000-01-01'))
+            if (now - last_seen).total_seconds() > USER_PRESENCE_TIMEOUT:
+                pipe.hdel(presence_key, str(user_id))
+        pipe.execute()
+    except Exception as e:
+        logging.error(f"Failed to cleanup disconnected users: {str(e)}")
+
+@retry_with_backoff
+def cache_cursor_position(room_id, user_id, position_data, timeout=5):
+    """Cache cursor position with rate limiting"""
+    try:
+        cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
+        # Use shorter timeout for cursor positions
+        redis_client.setex(cursor_key, timeout, json.dumps(position_data))
+    except Exception as e:
+        logging.error(f"Failed to cache cursor position: {str(e)}")
+
+@retry_with_backoff
+def get_cursor_positions(room_id):
+    """Get all active cursor positions in a room"""
+    try:
+        pattern = get_cache_key(f"cursor_{room_id}_*")
+        cursor_keys = redis_client.keys(pattern)
+        positions = {}
+        
+        for key in cursor_keys:
+            user_id = key.split('_')[-1]
+            data = redis_client.get(key)
+            if data:
+                positions[user_id] = json.loads(data)
+        return positions
+    except Exception as e:
+        logging.error(f"Failed to get cursor positions: {str(e)}")
+        return {}
 
 def check_redis_connection():
     """Check Redis connection health"""

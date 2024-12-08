@@ -202,12 +202,25 @@ def handle_redo(data):
 @socketio.on('cursor_move')
 def handle_cursor_move(data):
     room = data['room']
-    emit('cursor_update', {
-        'room': room,
-        'userName': data['userName'],
-        'x': data['x'],
-        'y': data['y']
-    }, room=room, include_self=False)
+    try:
+        # Cache cursor position
+        cursor_data = {
+            'userName': data['userName'],
+            'x': data['x'],
+            'y': data['y'],
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        cache_cursor_position(room, request.sid, cursor_data)
+        
+        # Broadcast to room
+        emit('cursor_update', {
+            'room': room,
+            'userName': data['userName'],
+            'x': data['x'],
+            'y': data['y']
+        }, room=room, include_self=False)
+    except Exception as e:
+        logger.error(f"Error handling cursor move: {str(e)}")
 
 
 @socketio.on('viewport_update')
