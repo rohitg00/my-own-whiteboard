@@ -178,6 +178,7 @@ class Whiteboard {
                         await new Promise(resolve => {
                             fabric.util.enlivenObjects([path], (objects) => {
                                 objects.forEach(obj => {
+                                    console.log('Adding object to canvas:', obj);
                                     this.canvas.add(obj);
                                     this.history.push(obj);
                                 });

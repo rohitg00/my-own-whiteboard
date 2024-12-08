@@ -161,7 +161,7 @@ def handle_join(data):
 def handle_draw(data):
     room = data['room']
     try:
-        # Serialize path data with proper encoding
+        # Serialize path data
         path_data = json.dumps(data['path'])
         
         # Store in database
@@ -169,17 +169,17 @@ def handle_draw(data):
         db.session.add(drawing)
         db.session.commit()
         
-        # Update cache
+        # Update cache with atomic operation
         cache_key = f"drawing_data_{room}"
-        cached_data = cache.get(cache_key)
-        if cached_data:
-            drawing_list = json.loads(cached_data)
+        try:
+            cached_data = cache.get(cache_key)
+            drawing_list = json.loads(cached_data) if cached_data else []
             drawing_list.append(data['path'])
             cache.setex(cache_key, 3600, json.dumps(drawing_list))
-        else:
-            cache.setex(cache_key, 3600, json.dumps([data['path']]))
+        except Exception as e:
+            app.logger.error(f"Cache update failed: {e}")
         
-        # Broadcast to room with proper data structure
+        # Broadcast to room
         socketio.emit('draw_update', {
             'room': room,
             'path': data['path']

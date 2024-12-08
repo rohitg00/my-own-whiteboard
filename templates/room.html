@@ -62,12 +62,12 @@
     <script src="{{ url_for('static', filename='js/socket.js') }}"></script>
     <script src="{{ url_for('static', filename='js/whiteboard.js') }}"></script>
     <script>
-        // Initialize whiteboard first
-        const socketManager = new SocketManager();
-        const whiteboard = new Whiteboard('whiteboard', socketManager, '{{ room_id }}');
-
-        // Then setup event handlers
         document.addEventListener('DOMContentLoaded', () => {
+            // Initialize after DOM is loaded
+            const socketManager = new SocketManager();
+            window.whiteboard = new Whiteboard('whiteboard', socketManager, '{{ room_id }}');
+            
+            // Setup event handlers
             document.getElementById('colorPicker').addEventListener('change', (e) => {
                 whiteboard.setColor(e.target.value);
             });
