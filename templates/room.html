@@ -87,20 +87,25 @@
             window.setUserName = () => {
                 const userName = document.getElementById('userName').value.trim();
                 if (userName) {
-                    const socketManager = new SocketManager();
-                    socketManager.setUserName(userName);
-                    window.whiteboard = new Whiteboard('whiteboard', socketManager, '{{ room_id }}');
-                    
-                    // Setup event handlers
-                    document.getElementById('colorPicker').addEventListener('change', (e) => {
-                        whiteboard.setColor(e.target.value);
-                    });
+                    try {
+                        const socketManager = new SocketManager();
+                        socketManager.setUserName(userName);
+                        window.whiteboard = new Whiteboard('whiteboard', socketManager, '{{ room_id }}');
+                        
+                        // Setup event handlers
+                        document.getElementById('colorPicker').addEventListener('change', (e) => {
+                            whiteboard.setColor(e.target.value);
+                        });
 
-                    document.getElementById('brushSize').addEventListener('input', (e) => {
-                        whiteboard.setBrushSize(parseInt(e.target.value));
-                    });
-                    
-                    userNameModal.hide();
+                        document.getElementById('brushSize').addEventListener('input', (e) => {
+                            whiteboard.setBrushSize(parseInt(e.target.value));
+                        });
+                        
+                        userNameModal.hide();
+                    } catch (error) {
+                        console.error('Error initializing whiteboard:', error);
+                        alert('Failed to initialize whiteboard. Please try refreshing the page.');
+                    }
                 }
             };
         });
