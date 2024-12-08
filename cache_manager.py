@@ -250,28 +250,65 @@ def cleanup_disconnected_users(room_id):
         logging.error(f"Failed to cleanup disconnected users: {str(e)}")
 
 @retry_with_backoff
+def cache_cursor_batch(room_id, cursor_updates, timeout=5):
+    """Cache multiple cursor positions using pipeline"""
+    try:
+        pipe = redis_client.pipeline()
+        now = datetime.utcnow()
+        
+        for update in cursor_updates:
+            user_id = update.get('user_id')
+            cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
+            position_data = {
+                'x': update.get('x'),
+                'y': update.get('y'),
+                'userName': update.get('userName'),
+                'timestamp': now.isoformat()
+            }
+            # Set with expiration for automatic cleanup
+            pipe.setex(cursor_key, timeout, json.dumps(position_data))
+        
+        pipe.execute()
+    except Exception as e:
+        logging.error(f"Failed to cache cursor batch: {str(e)}")
+
+@retry_with_backoff
 def cache_cursor_position(room_id, user_id, position_data, timeout=5):
-    """Cache cursor position with rate limiting"""
+    """Cache single cursor position with debouncing"""
     try:
         cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
-        # Use shorter timeout for cursor positions
+        # Add timestamp for cursor expiration
+        position_data['timestamp'] = datetime.utcnow().isoformat()
         redis_client.setex(cursor_key, timeout, json.dumps(position_data))
     except Exception as e:
         logging.error(f"Failed to cache cursor position: {str(e)}")
 
 @retry_with_backoff
 def get_cursor_positions(room_id):
-    """Get all active cursor positions in a room"""
+    """Get all active cursor positions in a room with cleanup"""
     try:
         pattern = get_cache_key(f"cursor_{room_id}_*")
         cursor_keys = redis_client.keys(pattern)
         positions = {}
+        pipe = redis_client.pipeline()
         
+        # Read all positions in a single pipeline
         for key in cursor_keys:
-            user_id = key.split('_')[-1]
-            data = redis_client.get(key)
+            pipe.get(key)
+        
+        results = pipe.execute()
+        now = datetime.utcnow()
+        
+        for key, data in zip(cursor_keys, results):
             if data:
-                positions[user_id] = json.loads(data)
+                user_id = key.split('_')[-1]
+                cursor_data = json.loads(data)
+                # Check if cursor position is not expired
+                if cursor_data.get('timestamp'):
+                    last_update = datetime.fromisoformat(cursor_data['timestamp'])
+                    if (now - last_update).total_seconds() <= 5:  # 5 second expiration
+                        positions[user_id] = cursor_data
+        
         return positions
     except Exception as e:
         logging.error(f"Failed to get cursor positions: {str(e)}")

@@ -14,8 +14,13 @@
         <div class="whiteboard-container">
             <div class="toolbar">
                 <div class="tool-group">
-                    <input type="color" id="colorPicker" class="form-control form-control-color" value="#000000">
-                    <input type="range" id="brushSize" min="1" max="20" value="2" class="form-range">
+                    <div class="color-picker-wrapper">
+                        <input type="color" id="colorPicker" class="form-control form-control-color" value="#000000">
+                    </div>
+                    <div class="brush-size-wrapper">
+                        <input type="range" id="brushSize" min="1" max="20" value="2" class="form-range custom-range">
+                        <div class="brush-size-preview" id="brushSizePreview"></div>
+                    </div>
                 </div>
                 <div class="tool-group">
                     <button class="btn btn-secondary" onclick="whiteboard.undo()">Undo</button>

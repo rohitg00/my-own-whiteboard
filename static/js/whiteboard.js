@@ -14,6 +14,17 @@ class Whiteboard {
         this.currentMode = 'draw';
         this.isDrawing = false;
         this.cursors = new Map();
+        this.userColors = new Map();
+        this.colorPalette = [
+            '#4B0082', // Indigo
+            '#006400', // Dark Green
+            '#8B4513', // Saddle Brown
+            '#4A148C', // Deep Purple
+            '#1A237E', // Dark Blue
+            '#3E2723', // Dark Brown
+            '#004D40', // Dark Teal
+            '#880E4F', // Dark Pink
+        ];
         
         // Initialize viewport state
         this.viewportState = {
@@ -137,25 +148,35 @@ class Whiteboard {
     }
 
     setupEventListeners() {
-        // Add cursor tracking with throttling
+        // Add cursor tracking with improved throttling
         let lastEmit = 0;
-        const EMIT_INTERVAL = 50; // 50ms throttle
+        const THROTTLE_INTERVAL = 30; // Reduce from 50ms to 30ms
+        const BATCH_SIZE = 5; // Add batch processing
+        let cursorUpdates = [];
         
         this.canvas.on('mouse:move', (opt) => {
             const now = Date.now();
-            if (now - lastEmit > EMIT_INTERVAL) {
+            if (now - lastEmit > THROTTLE_INTERVAL) {
                 const pointer = this.canvas.getPointer(opt.e);
                 
                 // Ensure pointer coordinates are within canvas bounds
                 const x = Math.min(Math.max(pointer.x, 0), this.canvas.width);
                 const y = Math.min(Math.max(pointer.y, 0), this.canvas.height);
                 
-                this.socket.emit('cursor_move', {
-                    room: this.roomId,
+                cursorUpdates.push({
                     x: x,
-                    y: y
+                    y: y,
+                    timestamp: now
                 });
-                lastEmit = now;
+
+                if (cursorUpdates.length >= BATCH_SIZE) {
+                    this.socket.emit('cursor_batch', {
+                        room: this.roomId,
+                        updates: cursorUpdates
+                    });
+                    cursorUpdates = [];
+                    lastEmit = now;
+                }
             }
         });
 
