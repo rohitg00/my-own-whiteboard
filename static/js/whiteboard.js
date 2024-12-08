@@ -4,7 +4,8 @@ class Whiteboard {
             isDrawingMode: true,
             width: window.innerWidth * 0.9,
             height: window.innerHeight * 0.8,
-            backgroundColor: '#ffffff'
+            backgroundColor: '#ffffff',
+            selection: false // Disable multiple selection
         });
         this.socket = socket;
         this.roomId = roomId;
@@ -61,9 +62,9 @@ class Whiteboard {
         this.canvas.on('mouse:down', (o) => {
             this.isDrawing = true;
             const pointer = this.canvas.getPointer(o.e);
-            const constrained = this.constrainToBoundary(pointer);
-            origX = constrained.x;
-            origY = constrained.y;
+            origX = pointer.x;
+            origY = pointer.y;
+            
             rect = new fabric.Rect({
                 left: origX,
                 top: origY,
@@ -71,7 +72,8 @@ class Whiteboard {
                 height: 0,
                 fill: 'transparent',
                 stroke: this.canvas.freeDrawingBrush.color,
-                strokeWidth: this.canvas.freeDrawingBrush.width
+                strokeWidth: this.canvas.freeDrawingBrush.width,
+                selectable: false
             });
             this.canvas.add(rect);
         });
@@ -79,13 +81,18 @@ class Whiteboard {
         this.canvas.on('mouse:move', (o) => {
             if (!this.isDrawing) return;
             const pointer = this.canvas.getPointer(o.e);
-            const constrained = this.constrainToBoundary(pointer);
+            
+            // Calculate dimensions while keeping within bounds
+            const width = Math.min(Math.abs(pointer.x - origX), 
+                             this.canvas.getWidth() - Math.min(origX, pointer.x));
+            const height = Math.min(Math.abs(pointer.y - origY),
+                              this.canvas.getHeight() - Math.min(origY, pointer.y));
             
             rect.set({
-                width: Math.abs(constrained.x - origX),
-                height: Math.abs(constrained.y - origY),
-                left: Math.min(origX, constrained.x),
-                top: Math.min(origY, constrained.y)
+                width: width,
+                height: height,
+                left: Math.min(origX, pointer.x),
+                top: Math.min(origY, pointer.y)
             });
             this.canvas.renderAll();
         });
@@ -108,16 +115,17 @@ class Whiteboard {
         this.canvas.on('mouse:down', (o) => {
             this.isDrawing = true;
             const pointer = this.canvas.getPointer(o.e);
-            const constrained = this.constrainToBoundary(pointer);
-            origX = constrained.x;
-            origY = constrained.y;
+            origX = pointer.x;
+            origY = pointer.y;
+            
             circle = new fabric.Circle({
                 left: origX,
                 top: origY,
                 radius: 0,
                 fill: 'transparent',
                 stroke: this.canvas.freeDrawingBrush.color,
-                strokeWidth: this.canvas.freeDrawingBrush.width
+                strokeWidth: this.canvas.freeDrawingBrush.width,
+                selectable: false
             });
             this.canvas.add(circle);
         });
@@ -125,12 +133,19 @@ class Whiteboard {
         this.canvas.on('mouse:move', (o) => {
             if (!this.isDrawing) return;
             const pointer = this.canvas.getPointer(o.e);
-            const constrained = this.constrainToBoundary(pointer);
-            const radius = Math.sqrt(Math.pow(constrained.x - origX, 2) + Math.pow(constrained.y - origY, 2)) / 2;
+            
+            // Calculate radius while keeping within bounds
+            const maxRadius = Math.min(
+                Math.abs(pointer.x - origX),
+                Math.abs(pointer.y - origY),
+                origX,
+                origY,
+                this.canvas.getWidth() - origX,
+                this.canvas.getHeight() - origY
+            );
+            
             circle.set({
-                radius: radius,
-                left: origX - radius,
-                top: origY - radius
+                radius: maxRadius / 2
             });
             this.canvas.renderAll();
         });
@@ -322,22 +337,29 @@ class Whiteboard {
             console.error('Socket.IO error:', error);
         });
 
-        // Update pointer coordinates calculation
         this.canvas.on('mouse:move', (opt) => {
+            if (!this.isDrawing) return;
             const pointer = this.canvas.getPointer(opt.e);
-            // Normalize coordinates relative to canvas bounds
-            const canvasRect = this.canvas.getElement().getBoundingClientRect();
-            const normalizedX = (pointer.x - canvasRect.left) / this.viewportState.zoom;
-            const normalizedY = (pointer.y - canvasRect.top) / this.viewportState.zoom;
+            const zoom = this.canvas.getZoom();
             
-            // Use normalized coordinates for drawing
-            if (this.isDrawing) {
-                // Update current path with normalized coordinates
-                const path = this.canvas.freeDrawingBrush._points;
-                if (path && path.length > 0) {
-                    path[path.length - 1].x = normalizedX;
-                    path[path.length - 1].y = normalizedY;
-                }
+            // Transform coordinates to account for zoom and pan
+            const actualX = (pointer.x - this.canvas.viewportTransform[4]) / zoom;
+            const actualY = (pointer.y - this.canvas.viewportTransform[5]) / zoom;
+            
+            // Constrain to canvas boundaries
+            const width = this.canvas.getWidth() / zoom;
+            const height = this.canvas.getHeight() / zoom;
+            
+            const constrained = {
+                x: Math.min(Math.max(actualX, 0), width),
+                y: Math.min(Math.max(actualY, 0), height)
+            };
+            
+            // Update current path with constrained coordinates
+            const path = this.canvas.freeDrawingBrush._points;
+            if (path && path.length > 0) {
+                path[path.length - 1].x = constrained.x;
+                path[path.length - 1].y = constrained.y;
             }
         });
 
