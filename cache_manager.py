@@ -1,14 +1,22 @@
-from app import app
-from functools import wraps
-import time
+import redis
 import logging
 import json
-import redis
-from datetime import datetime
 import os
+from datetime import datetime
+from functools import wraps
+import time
+
+# Redis configuration
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+CACHE_VERSION = "1.1"
+MAX_RETRIES = 3
+BASE_BACKOFF = 0.1
+DRAWING_CACHE_TIMEOUT = 3600  # 1 hour
+ROOM_CACHE_TIMEOUT = 86400   # 24 hours
+USER_PRESENCE_TIMEOUT = 300  # 5 minutes
+PREFETCH_THRESHOLD = 10      # Number of accesses before prefetching
 
 # Initialize Redis connection pool
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 redis_pool = redis.ConnectionPool.from_url(
     REDIS_URL,
     max_connections=10,
@@ -16,16 +24,8 @@ redis_pool = redis.ConnectionPool.from_url(
     socket_connect_timeout=5,
     retry_on_timeout=True
 )
-cache = redis.Redis(connection_pool=redis_pool, decode_responses=True)
 
-# Cache configuration
-CACHE_VERSION = "1.1"  # Increment version to invalidate old cache
-MAX_RETRIES = 3
-BASE_BACKOFF = 0.1  # 100ms
-DRAWING_CACHE_TIMEOUT = 3600  # 1 hour
-ROOM_CACHE_TIMEOUT = 86400   # 24 hours
-USER_PRESENCE_TIMEOUT = 300  # 5 minutes
-PREFETCH_THRESHOLD = 10      # Number of accesses before prefetching
+redis_client = redis.Redis(connection_pool=redis_pool, decode_responses=True)
 
 def get_cache_key(base_key, version=CACHE_VERSION):
     """Generate versioned cache key"""
@@ -40,16 +40,16 @@ def retry_with_backoff(func):
                 return func(*args, **kwargs)
             except redis.ConnectionError as e:
                 if attempt == MAX_RETRIES - 1:
-                    app.logger.error(f"Redis connection failed after {MAX_RETRIES} attempts: {str(e)}")
+                    logging.error(f"Redis connection failed after {MAX_RETRIES} attempts: {str(e)}")
                     raise
                 backoff = BASE_BACKOFF * (2 ** attempt)
-                app.logger.warning(f"Redis connection failed (attempt {attempt + 1}): {str(e)}. Retrying in {backoff}s")
+                logging.warning(f"Redis connection failed (attempt {attempt + 1}): {str(e)}. Retrying in {backoff}s")
                 time.sleep(backoff)
             except redis.RedisError as e:
-                app.logger.error(f"Redis operation error: {str(e)}")
+                logging.error(f"Redis operation error: {str(e)}")
                 raise
             except Exception as e:
-                app.logger.error(f"Unexpected cache error: {str(e)}")
+                logging.error(f"Unexpected cache error: {str(e)}")
                 raise
     return wrapper
 
@@ -63,10 +63,11 @@ def log_cache_stats(func):
         
         # Log cache operation stats
         cache_status = "hit" if result is not None else "miss"
-        app.logger.info(f"Cache {cache_status} - Key: {kwargs.get('cache_key')} - Duration: {duration:.3f}s")
+        logging.info(f"Cache {cache_status} - Key: {kwargs.get('cache_key')} - Duration: {duration:.3f}s")
         
         return result
     return wrapper
+
 
 def cache_drawing(timeout=300):
     """Enhanced caching decorator with retry and monitoring"""
@@ -81,11 +82,11 @@ def cache_drawing(timeout=300):
             @retry_with_backoff
             @log_cache_stats
             def get_cached_data():
-                return cache.get(cache_key)
+                return redis_client.get(cache_key)
             
             @retry_with_backoff
             def set_cached_data(data):
-                cache.set(cache_key, data, timeout=timeout)
+                redis_client.set(cache_key, data, timeout=timeout)
                 # Update access patterns for prefetching
                 update_access_pattern(room_id)
             
@@ -107,28 +108,28 @@ def update_access_pattern(room_id):
     """Track room access patterns for prefetching"""
     pattern_key = f"access_pattern:{room_id}"
     try:
-        cache.set(
+        redis_client.set(
             pattern_key,
             {
                 'last_access': datetime.utcnow().isoformat(),
-                'access_count': cache.get(pattern_key, {}).get('access_count', 0) + 1
+                'access_count': redis_client.get(pattern_key, {}).get('access_count', 0) + 1
             },
             timeout=86400  # 24 hours
         )
     except Exception as e:
-        app.logger.warning(f"Failed to update access pattern: {str(e)}")
+        logging.warning(f"Failed to update access pattern: {str(e)}")
 
 def prefetch_room_data(room_id):
     """Prefetch room data based on access patterns"""
     pattern_key = f"access_pattern:{room_id}"
     try:
-        pattern = cache.get(pattern_key)
+        pattern = redis_client.get(pattern_key)
         if pattern and pattern.get('access_count', 0) > PREFETCH_THRESHOLD:
             # Room is frequently accessed, prefetch related data
-            app.logger.info(f"Prefetching data for frequently accessed room: {room_id}")
+            logging.info(f"Prefetching data for frequently accessed room: {room_id}")
             
             # Prefetch drawing data
-            from models import DrawingData
+            from models import DrawingData # Assumed this import is available
             drawings = DrawingData.query.filter_by(room_id=room_id).all()
             if drawings:
                 try:
@@ -137,43 +138,46 @@ def prefetch_room_data(room_id):
                     
                     @retry_with_backoff
                     def cache_drawings():
-                        cache.setex(
+                        redis_client.setex(
                             cache_key,
                             DRAWING_CACHE_TIMEOUT,
                             json.dumps(drawing_data, separators=(',', ':'))
                         )
                     
                     cache_drawings()
-                    app.logger.info(f"Successfully prefetched {len(drawing_data)} drawings for room {room_id}")
+                    logging.info(f"Successfully prefetched {len(drawing_data)} drawings for room {room_id}")
                 except json.JSONDecodeError as e:
-                    app.logger.error(f"Error parsing drawing data during prefetch: {e}")
+                    logging.error(f"Error parsing drawing data during prefetch: {e}")
     except Exception as e:
-        app.logger.warning(f"Failed to prefetch room data: {str(e)}")
+        logging.warning(f"Failed to prefetch room data: {str(e)}")
 
+@retry_with_backoff
 def cache_room_state(room_id, state_data, timeout=ROOM_CACHE_TIMEOUT):
     """Cache room state including viewport and active users"""
     try:
         cache_key = get_cache_key(f"room_state_{room_id}")
-        cache.setex(
+        redis_client.setex(
             cache_key,
             timeout,
             json.dumps(state_data, separators=(',', ':'))
         )
-        app.logger.info(f"Cached room state for room {room_id}")
+        logging.info(f"Cached room state for room {room_id}")
     except Exception as e:
-        app.logger.error(f"Failed to cache room state: {str(e)}")
+        logging.error(f"Failed to cache room state: {str(e)}")
 
+@retry_with_backoff
 def get_room_state(room_id):
     """Retrieve cached room state"""
     try:
         cache_key = get_cache_key(f"room_state_{room_id}")
-        data = cache.get(cache_key)
+        data = redis_client.get(cache_key)
         if data:
             return json.loads(data)
     except Exception as e:
-        app.logger.error(f"Failed to get room state: {str(e)}")
+        logging.error(f"Failed to get room state: {str(e)}")
     return None
 
+@retry_with_backoff
 def track_user_presence(room_id, user_id, user_data):
     """Track user presence in a room"""
     try:
@@ -181,42 +185,47 @@ def track_user_presence(room_id, user_id, user_data):
         user_key = f"user:{user_id}"
         
         # Update user data in room
-        cache.hset(presence_key, user_key, json.dumps(user_data))
+        redis_client.hset(presence_key, user_key, json.dumps(user_data))
         # Set expiration for user presence
-        cache.expire(presence_key, USER_PRESENCE_TIMEOUT)
+        redis_client.expire(presence_key, USER_PRESENCE_TIMEOUT)
         
-        app.logger.info(f"Updated presence for user {user_id} in room {room_id}")
+        logging.info(f"Updated presence for user {user_id} in room {room_id}")
     except Exception as e:
-        app.logger.error(f"Failed to track user presence: {str(e)}")
+        logging.error(f"Failed to track user presence: {str(e)}")
 
+@retry_with_backoff
 def get_active_users(room_id):
     """Get all active users in a room"""
     try:
         presence_key = get_cache_key(f"presence_{room_id}")
-        user_data = cache.hgetall(presence_key)
+        user_data = redis_client.hgetall(presence_key)
         return {k: json.loads(v) for k, v in user_data.items()}
     except Exception as e:
-        app.logger.error(f"Failed to get active users: {str(e)}")
+        logging.error(f"Failed to get active users: {str(e)}")
         return {}
 
+@retry_with_backoff
 def invalidate_room_cache(room_id):
     """Invalidate all cached data for a room"""
     try:
         # Get all keys for the room
         room_pattern = get_cache_key(f"*_{room_id}")
-        keys = cache.keys(room_pattern)
+        keys = redis_client.keys(room_pattern)
         
         if keys:
-            cache.delete(*keys)
-            app.logger.info(f"Invalidated cache for room {room_id}")
+            redis_client.delete(*keys)
+            logging.info(f"Invalidated cache for room {room_id}")
     except Exception as e:
-        app.logger.error(f"Failed to invalidate room cache: {str(e)}")
+        logging.error(f"Failed to invalidate room cache: {str(e)}")
 
 def check_redis_connection():
     """Check Redis connection health"""
     try:
-        cache.ping()
+        redis_client.ping()
         return True
-    except redis.ConnectionError as e:
-        app.logger.error(f"Redis connection error: {str(e)}")
+    except Exception as e:
+        logging.error(f"Redis connection error: {e}")
         return False
+
+# Export the redis client as cache
+cache = redis_client
