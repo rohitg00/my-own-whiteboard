@@ -56,7 +56,7 @@ class Whiteboard {
     }
 
     updateCursor(data) {
-        console.log('Updating cursor for:', data.userName);  // Debug log
+        console.log('Updating cursor for:', data.userName);
         
         // Remove existing cursor
         const existingCursor = this.canvas.getObjects().find(
@@ -80,58 +80,60 @@ class Whiteboard {
             evented: false
         });
 
-        // Create background for text
+        // Create background for text with increased width
         const textBg = new fabric.Rect({
-            fill: 'rgba(0, 0, 0, 0.6)',
-            width: 100,
-            height: 24,
-            rx: 12,
-            ry: 12,
+            fill: 'rgba(0, 0, 0, 0.8)',
+            width: 120,
+            height: 30,
+            rx: 15,
+            ry: 15,
             originX: 'center',
             originY: 'center',
             selectable: false,
             evented: false
         });
 
-        // Create username text
+        // Create username text with adjusted position
         const text = new fabric.Text(data.userName || 'Anonymous', {
-            fontSize: 14,
+            fontSize: 16,
             fill: '#ffffff',
             fontFamily: 'Arial',
+            fontWeight: 'bold',
             originX: 'center',
             originY: 'center',
             selectable: false,
             evented: false
         });
 
-        // Create group for text and background
+        // Position text and background above cursor
         const textGroup = new fabric.Group([textBg, text], {
             left: 0,
-            top: -30,
+            top: -40,
             selectable: false,
             evented: false
         });
 
-        // Adjust background width to match text
+        // Adjust background width to text
         textBg.set({
-            width: text.width + 20,
-            left: text.left,
-            top: text.top
+            width: Math.max(text.width + 20, 80)
         });
 
-        // Create main cursor group
+        // Create main cursor group with high z-index
         const cursorGroup = new fabric.Group([cursor, textGroup], {
             left: data.x,
             top: data.y,
             selectable: false,
             evented: false,
-            id: `cursor_${data.userName}`
+            id: `cursor_${data.userName}`,
+            zIndex: 999
         });
 
-        // Add to canvas and bring to front
+        // Add to canvas and ensure it's on top
         this.canvas.add(cursorGroup);
         cursorGroup.bringToFront();
-        this.canvas.renderAll();
+        
+        // Force canvas refresh
+        this.canvas.requestRenderAll();
     }
 
     setupEventListeners() {
@@ -143,10 +145,15 @@ class Whiteboard {
             const now = Date.now();
             if (now - lastEmit > EMIT_INTERVAL) {
                 const pointer = this.canvas.getPointer(opt.e);
+                
+                // Ensure pointer coordinates are within canvas bounds
+                const x = Math.min(Math.max(pointer.x, 0), this.canvas.width);
+                const y = Math.min(Math.max(pointer.y, 0), this.canvas.height);
+                
                 this.socket.emit('cursor_move', {
                     room: this.roomId,
-                    x: pointer.x,
-                    y: pointer.y
+                    x: x,
+                    y: y
                 });
                 lastEmit = now;
             }
