@@ -102,10 +102,10 @@ class Whiteboard {
             evented: false
         });
 
-        // Create background for text with increased width
+        // Create background for text with improved visibility
         const textBg = new fabric.Rect({
-            fill: `${userColor}CC`,  // Add transparency to user color
-            width: 120,
+            fill: 'rgba(0, 0, 0, 0.8)',  // More opaque background
+            width: Math.max(text.width + 30, 100),  // Wider background
             height: 30,
             rx: 15,
             ry: 15,
@@ -115,10 +115,10 @@ class Whiteboard {
             evented: false
         });
 
-        // Create username text with adjusted position
+        // Create username text with improved visibility
         const text = new fabric.Text(data.userName || 'Anonymous', {
-            fontSize: 16,
-            fill: '#ffffff',
+            fontSize: 18,  // Larger font
+            fill: '#ffffff',  // White text
             fontFamily: 'Arial',
             fontWeight: 'bold',
             originX: 'center',
@@ -127,10 +127,10 @@ class Whiteboard {
             evented: false
         });
 
-        // Position text and background above cursor
+        // Position text and background further above cursor
         const textGroup = new fabric.Group([textBg, text], {
             left: 0,
-            top: -40,
+            top: -50,  // Increased distance from cursor
             selectable: false,
             evented: false
         });
