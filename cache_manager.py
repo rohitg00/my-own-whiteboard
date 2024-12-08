@@ -2,154 +2,80 @@ import redis
 import logging
 import json
 import os
-from datetime import datetime
-from functools import wraps
 import time
+from datetime import datetime, timedelta
+from functools import wraps
+from cache_circuit_breaker import CircuitBreaker
 
-# Redis configuration
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-CACHE_VERSION = "1.1"
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+# Constants
 MAX_RETRIES = 3
 BASE_BACKOFF = 0.1
+USER_PRESENCE_TIMEOUT = 30  # seconds
 DRAWING_CACHE_TIMEOUT = 3600  # 1 hour
 ROOM_CACHE_TIMEOUT = 86400   # 24 hours
-USER_PRESENCE_TIMEOUT = 300  # 5 minutes
 PREFETCH_THRESHOLD = 10      # Number of accesses before prefetching
 
-# Initialize Redis connection pool
-redis_pool = redis.ConnectionPool.from_url(
-    REDIS_URL,
-    max_connections=10,
-    socket_timeout=5,
-    socket_connect_timeout=5,
-    retry_on_timeout=True
-)
+# Configure Redis connection
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+redis_client = redis.from_url(REDIS_URL)
 
-redis_client = redis.Redis(connection_pool=redis_pool, decode_responses=True)
+# Initialize circuit breaker
+cache_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=60)
 
-def get_cache_key(base_key, version=CACHE_VERSION):
-    """Generate versioned cache key"""
-    return f"{base_key}:v{version}"
+def get_cache_key(key):
+    """Generate a namespaced cache key"""
+    return f"whiteboard:{key}"
 
 def retry_with_backoff(func):
-    """Enhanced retry decorator with exponential backoff and Redis-specific error handling"""
-    @wraps(func)
+    """Retry function with exponential backoff"""
     def wrapper(*args, **kwargs):
-        for attempt in range(MAX_RETRIES):
+        max_attempts = 3
+        attempt = 0
+        backoff = 1
+        
+        while attempt < max_attempts:
             try:
                 return func(*args, **kwargs)
-            except redis.ConnectionError as e:
-                if attempt == MAX_RETRIES - 1:
-                    logging.error(f"Redis connection failed after {MAX_RETRIES} attempts: {str(e)}")
-                    raise
-                backoff = BASE_BACKOFF * (2 ** attempt)
-                logging.warning(f"Redis connection failed (attempt {attempt + 1}): {str(e)}. Retrying in {backoff}s")
-                time.sleep(backoff)
-            except redis.RedisError as e:
-                logging.error(f"Redis operation error: {str(e)}")
-                raise
             except Exception as e:
-                logging.error(f"Unexpected cache error: {str(e)}")
-                raise
+                attempt += 1
+                if attempt == max_attempts:
+                    raise e
+                sleep_time = backoff * 2 ** attempt
+                logging.warning(f"Retry attempt {attempt} for {func.__name__}, sleeping for {sleep_time}s")
+                time.sleep(sleep_time)
+        
     return wrapper
 
-def log_cache_stats(func):
-    """Log cache hit/miss statistics"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        duration = time.time() - start_time
-        
-        # Log cache operation stats
-        cache_status = "hit" if result is not None else "miss"
-        logging.info(f"Cache {cache_status} - Key: {kwargs.get('cache_key')} - Duration: {duration:.3f}s")
-        
-        return result
-    return wrapper
-
-
-def cache_drawing(timeout=300):
-    """Enhanced caching decorator with retry and monitoring"""
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            room_id = kwargs.get('room_id')
-            base_key = f"drawing_{room_id}"
-            cache_key = get_cache_key(base_key)
-            kwargs['cache_key'] = cache_key  # For logging
-            
-            @retry_with_backoff
-            @log_cache_stats
-            def get_cached_data():
-                return redis_client.get(cache_key)
-            
-            @retry_with_backoff
-            def set_cached_data(data):
-                redis_client.set(cache_key, data, timeout=timeout)
-                # Update access patterns for prefetching
-                update_access_pattern(room_id)
-            
-            # Try to get cached data
-            cached_data = get_cached_data()
-            if cached_data is not None:
-                return cached_data
-            
-            # Get fresh data
-            data = f(*args, **kwargs)
-            if data is not None:
-                set_cached_data(data)
-            return data
-            
-        return decorated_function
-    return decorator
-
-def update_access_pattern(room_id):
-    """Track room access patterns for prefetching"""
-    pattern_key = f"access_pattern:{room_id}"
+@retry_with_backoff
+def monitor_redis_health():
+    """Monitor Redis connection health and log status"""
     try:
-        redis_client.set(
-            pattern_key,
-            {
-                'last_access': datetime.utcnow().isoformat(),
-                'access_count': redis_client.get(pattern_key, {}).get('access_count', 0) + 1
-            },
-            timeout=86400  # 24 hours
-        )
+        if check_redis_connection():
+            logging.info("Redis connection is healthy")
+            # Get cache stats
+            info = redis_client.info()
+            logging.info(f"Connected clients: {info.get('connected_clients', 'N/A')}")
+            logging.info(f"Used memory: {info.get('used_memory_human', 'N/A')}")
+            return True
+        else:
+            logging.error("Redis connection is not healthy")
+            return False
     except Exception as e:
-        logging.warning(f"Failed to update access pattern: {str(e)}")
+        logging.error(f"Error monitoring Redis health: {str(e)}")
+        return False
 
-def prefetch_room_data(room_id):
-    """Prefetch room data based on access patterns"""
-    pattern_key = f"access_pattern:{room_id}"
+@retry_with_backoff
+def check_redis_connection():
+    """Check Redis connection health"""
     try:
-        pattern = redis_client.get(pattern_key)
-        if pattern and pattern.get('access_count', 0) > PREFETCH_THRESHOLD:
-            # Room is frequently accessed, prefetch related data
-            logging.info(f"Prefetching data for frequently accessed room: {room_id}")
-            
-            # Prefetch drawing data
-            from models import DrawingData # Assumed this import is available
-            drawings = DrawingData.query.filter_by(room_id=room_id).all()
-            if drawings:
-                try:
-                    drawing_data = [json.loads(d.data) for d in drawings]
-                    cache_key = get_cache_key(f"drawing_data_{room_id}")
-                    
-                    @retry_with_backoff
-                    def cache_drawings():
-                        redis_client.setex(
-                            cache_key,
-                            DRAWING_CACHE_TIMEOUT,
-                            json.dumps(drawing_data, separators=(',', ':'))
-                        )
-                    
-                    cache_drawings()
-                    logging.info(f"Successfully prefetched {len(drawing_data)} drawings for room {room_id}")
-                except json.JSONDecodeError as e:
-                    logging.error(f"Error parsing drawing data during prefetch: {e}")
+        redis_client.ping()
+        return True
     except Exception as e:
-        logging.warning(f"Failed to prefetch room data: {str(e)}")
+        logging.error(f"Redis connection error: {e}")
+        return False
 
 @retry_with_backoff
 def cache_room_state(room_id, state_data, timeout=ROOM_CACHE_TIMEOUT):
@@ -164,18 +90,6 @@ def cache_room_state(room_id, state_data, timeout=ROOM_CACHE_TIMEOUT):
         logging.info(f"Cached room state for room {room_id}")
     except Exception as e:
         logging.error(f"Failed to cache room state: {str(e)}")
-
-@retry_with_backoff
-def get_room_state(room_id):
-    """Retrieve cached room state"""
-    try:
-        cache_key = get_cache_key(f"room_state_{room_id}")
-        data = redis_client.get(cache_key)
-        if data:
-            return json.loads(data)
-    except Exception as e:
-        logging.error(f"Failed to get room state: {str(e)}")
-    return None
 
 @retry_with_backoff
 def track_user_presence(room_id, user_id, user_data):
@@ -220,18 +134,44 @@ def get_active_users(room_id):
         return {}
 
 @retry_with_backoff
-def invalidate_room_cache(room_id):
-    """Invalidate all cached data for a room"""
+def prefetch_room_data(room_id):
+    """Prefetch room data based on access patterns"""
+    pattern_key = get_cache_key(f"access_pattern:{room_id}")
     try:
-        # Get all keys for the room
-        room_pattern = get_cache_key(f"*_{room_id}")
-        keys = redis_client.keys(room_pattern)
-        
-        if keys:
-            redis_client.delete(*keys)
-            logging.info(f"Invalidated cache for room {room_id}")
+        pattern = redis_client.get(pattern_key)
+        if pattern and pattern.get('access_count', 0) > PREFETCH_THRESHOLD:
+            # Room is frequently accessed, prefetch related data
+            logging.info(f"Prefetching data for frequently accessed room: {room_id}")
+            
+            # Prefetch drawing data
+            from models import DrawingData
+            drawings = DrawingData.query.filter_by(room_id=room_id).all()
+            if drawings:
+                try:
+                    drawing_data = [json.loads(d.data) for d in drawings]
+                    cache_key = get_cache_key(f"drawing_data_{room_id}")
+                    redis_client.setex(
+                        cache_key,
+                        DRAWING_CACHE_TIMEOUT,
+                        json.dumps(drawing_data, separators=(',', ':'))
+                    )
+                    logging.info(f"Successfully prefetched {len(drawing_data)} drawings for room {room_id}")
+                except json.JSONDecodeError as e:
+                    logging.error(f"Error parsing drawing data during prefetch: {e}")
     except Exception as e:
-        logging.error(f"Failed to invalidate room cache: {str(e)}")
+        logging.warning(f"Failed to prefetch room data: {str(e)}")
+
+@retry_with_backoff
+def cache_cursor_position(room_id, user_id, position_data, timeout=5):
+    """Cache single cursor position with debouncing"""
+    try:
+        cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
+        # Add timestamp for cursor expiration
+        position_data['timestamp'] = datetime.utcnow().isoformat()
+        redis_client.setex(cursor_key, timeout, json.dumps(position_data))
+    except Exception as e:
+        logging.error(f"Failed to cache cursor position: {str(e)}")
+
 @retry_with_backoff
 def cleanup_disconnected_users(room_id):
     """Remove users who haven't updated their presence recently"""
@@ -248,80 +188,6 @@ def cleanup_disconnected_users(room_id):
         pipe.execute()
     except Exception as e:
         logging.error(f"Failed to cleanup disconnected users: {str(e)}")
-
-@retry_with_backoff
-def cache_cursor_batch(room_id, cursor_updates, timeout=5):
-    """Cache multiple cursor positions using pipeline"""
-    try:
-        pipe = redis_client.pipeline()
-        now = datetime.utcnow()
-        
-        for update in cursor_updates:
-            user_id = update.get('user_id')
-            cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
-            position_data = {
-                'x': update.get('x'),
-                'y': update.get('y'),
-                'userName': update.get('userName'),
-                'timestamp': now.isoformat()
-            }
-            # Set with expiration for automatic cleanup
-            pipe.setex(cursor_key, timeout, json.dumps(position_data))
-        
-        pipe.execute()
-    except Exception as e:
-        logging.error(f"Failed to cache cursor batch: {str(e)}")
-
-@retry_with_backoff
-def cache_cursor_position(room_id, user_id, position_data, timeout=5):
-    """Cache single cursor position with debouncing"""
-    try:
-        cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
-        # Add timestamp for cursor expiration
-        position_data['timestamp'] = datetime.utcnow().isoformat()
-        redis_client.setex(cursor_key, timeout, json.dumps(position_data))
-    except Exception as e:
-        logging.error(f"Failed to cache cursor position: {str(e)}")
-
-@retry_with_backoff
-def get_cursor_positions(room_id):
-    """Get all active cursor positions in a room with cleanup"""
-    try:
-        pattern = get_cache_key(f"cursor_{room_id}_*")
-        cursor_keys = redis_client.keys(pattern)
-        positions = {}
-        pipe = redis_client.pipeline()
-        
-        # Read all positions in a single pipeline
-        for key in cursor_keys:
-            pipe.get(key)
-        
-        results = pipe.execute()
-        now = datetime.utcnow()
-        
-        for key, data in zip(cursor_keys, results):
-            if data:
-                user_id = key.split('_')[-1]
-                cursor_data = json.loads(data)
-                # Check if cursor position is not expired
-                if cursor_data.get('timestamp'):
-                    last_update = datetime.fromisoformat(cursor_data['timestamp'])
-                    if (now - last_update).total_seconds() <= 5:  # 5 second expiration
-                        positions[user_id] = cursor_data
-        
-        return positions
-    except Exception as e:
-        logging.error(f"Failed to get cursor positions: {str(e)}")
-        return {}
-
-def check_redis_connection():
-    """Check Redis connection health"""
-    try:
-        redis_client.ping()
-        return True
-    except Exception as e:
-        logging.error(f"Redis connection error: {e}")
-        return False
 
 # Export the redis client as cache
 cache = redis_client
