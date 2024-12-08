@@ -14,25 +14,17 @@
         <div class="whiteboard-container">
             <div class="toolbar">
                 <div class="tool-group">
-                    <div class="color-picker-wrapper">
-                        <input type="color" id="colorPicker" class="form-control form-control-color" value="#000000">
-                    </div>
-                    <div class="brush-size-wrapper">
-                        <input type="range" id="brushSize" min="1" max="20" value="2" class="form-range custom-range">
-                        <div class="brush-size-preview" id="brushSizePreview"></div>
-                    </div>
+                    <input type="color" id="colorPicker" class="form-control form-control-color" value="#000000">
+                    <input type="range" id="brushSize" min="1" max="20" value="2" class="form-range">
                 </div>
                 <div class="tool-group">
-                    <button class="btn btn-secondary" onclick="whiteboard.undo()" title="Undo (Ctrl/Cmd + Z)">Undo</button>
-                    <button class="btn btn-secondary" onclick="whiteboard.redo()" title="Redo (Ctrl/Cmd + Y)">Redo</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.undo()">Undo</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.redo()">Redo</button>
                 </div>
                 <div class="tool-group">
-                    <button class="btn btn-secondary" onclick="whiteboard.setTool('pen')" title="Pen (Ctrl/Cmd + P)">✏️</button>
-                    <button class="btn btn-secondary" onclick="whiteboard.setTool('line')" title="Line (Ctrl/Cmd + L)">⟋</button>
-                    <button class="btn btn-secondary" onclick="whiteboard.setTool('rectangle')" title="Rectangle (Ctrl/Cmd + R)">□</button>
-                    <button class="btn btn-secondary" onclick="whiteboard.setTool('circle')" title="Circle (Ctrl/Cmd + C)">○</button>
-                    <button class="btn btn-secondary" onclick="whiteboard.setTool('text')" title="Text (Ctrl/Cmd + T)">T</button>
-                    <button class="btn btn-secondary" onclick="whiteboard.setTool('eraser')" title="Eraser (Ctrl/Cmd + E)">🗑️</button>
+                    <button class="btn btn-secondary active" onclick="whiteboard.setMode('draw')">Draw</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.setMode('rect')">Rectangle</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.setMode('circle')">Circle</button>
                 </div>
                 <div class="tool-group">
                     <button class="btn btn-danger" onclick="whiteboard.clear()">Clear</button>

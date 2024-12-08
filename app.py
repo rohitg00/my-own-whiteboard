@@ -31,11 +31,10 @@ import models
 @app.route('/health')
 def health_check():
     """Health check endpoint for k8s and monitoring"""
-    redis_status = monitor_redis_health()
+    redis_status = check_redis_connection()
     return jsonify({
         'status': 'healthy' if redis_status else 'degraded',
         'redis': 'connected' if redis_status else 'disconnected',
-        'cache_stats': cache.info() if redis_status else {},
         'timestamp': datetime.utcnow().isoformat()
     }), 200 if redis_status else 503
 
