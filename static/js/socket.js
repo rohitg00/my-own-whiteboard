@@ -57,8 +57,9 @@ class SocketManager {
             // Always include userName in events
             const dataWithUser = {
                 ...data,
-                userName: this.userName
+                userName: this.userName || 'Anonymous'  // Ensure userName is never undefined
             };
+            console.log('Emitting event with data:', dataWithUser);  // Debug log
             this.socket.emit(event, dataWithUser);
         } catch (error) {
             console.error('Error emitting event:', error);

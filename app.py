@@ -8,7 +8,8 @@ import logging
 from extensions import db, socketio
 from cache_manager import (
     cache, check_redis_connection, cache_room_state,
-    track_user_presence, get_active_users, prefetch_room_data
+    track_user_presence, get_active_users, prefetch_room_data,
+    cache_cursor_position  # Add cursor position caching
 )
 
 # Configure logging

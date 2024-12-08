@@ -56,7 +56,9 @@ class Whiteboard {
     }
 
     updateCursor(data) {
-        // Remove existing cursor if any
+        console.log('Updating cursor for:', data.userName);  // Debug log
+        
+        // Remove existing cursor
         const existingCursor = this.canvas.getObjects().find(
             obj => obj.type === 'group' && obj.id === `cursor_${data.userName}`
         );
@@ -73,7 +75,7 @@ class Whiteboard {
             id: `cursor_${data.userName}`
         });
 
-        // Add cursor pointer (make it more visible)
+        // Add cursor pointer
         const cursor = new fabric.Triangle({
             width: 15,
             height: 15,
@@ -87,7 +89,8 @@ class Whiteboard {
         const text = new fabric.Text(data.userName || 'Anonymous', {
             fontSize: 14,
             fill: '#ff4444',
-            backgroundColor: 'rgba(0,0,0,0.4)',
+            backgroundColor: 'rgba(255,255,255,0.8)',
+            padding: 5,
             left: 10,
             top: -20,
             originX: 'left',
@@ -120,6 +123,7 @@ class Whiteboard {
 
         // Handle other users' cursors
         this.socket.on('cursor_update', (data) => {
+            console.log('Received cursor update:', data);  // Debug log
             if (data.room === this.roomId && data.userName !== this.socket.userName) {
                 this.updateCursor(data);
             }
