@@ -253,18 +253,32 @@ def cleanup_disconnected_users(room_id):
 
 @retry_with_backoff
 def cache_cursor_position(room_id, user_id, position_data, timeout=2):
-    """Cache cursor position with rate limiting and proper connection handling"""
+    """Cache cursor position with optimized connection handling"""
+    if not check_redis_connection():
+        logging.error("Redis connection is not available")
+        return
+
     try:
         cursor_key = get_cache_key(f"cursor_{room_id}_{user_id}")
         with redis_client.pipeline(transaction=False) as pipe:
-            pipe.setex(cursor_key, timeout, json.dumps(position_data))
-            pipe.execute()
+            try:
+                # Set cursor position with expiration
+                pipe.setex(cursor_key, timeout, json.dumps(position_data))
+                pipe.execute()
+                logging.debug(f"Successfully cached cursor position for user {user_id} in room {room_id}")
+            except redis.RedisError as e:
+                logging.error(f"Redis operation failed: {str(e)}")
+            except Exception as e:
+                logging.error(f"Unexpected error in cursor caching: {str(e)}")
     except Exception as e:
         logging.error(f"Failed to cache cursor position: {str(e)}")
     finally:
-        # Ensure connection is returned to pool
-        if hasattr(redis_client, 'connection'):
-            redis_client.connection_pool.release(redis_client.connection)
+        try:
+            # Safely release connection
+            if hasattr(redis_client, 'connection') and redis_client.connection:
+                redis_client.connection_pool.release(redis_client.connection)
+        except Exception as e:
+            logging.error(f"Error releasing Redis connection: {str(e)}")
 
 @retry_with_backoff
 def get_cursor_positions(room_id):
@@ -285,13 +299,23 @@ def get_cursor_positions(room_id):
         return {}
 
 def check_redis_connection():
-    """Check Redis connection health"""
-    try:
-        redis_client.ping()
-        return True
-    except Exception as e:
-        logging.error(f"Redis connection error: {e}")
-        return False
+    """Enhanced Redis connection health check with retry"""
+    for attempt in range(3):
+        try:
+            if redis_client.ping():
+                if attempt > 0:
+                    logging.info("Redis connection restored")
+                return True
+        except redis.ConnectionError as e:
+            if attempt == 2:
+                logging.error(f"Redis connection failed after 3 attempts: {e}")
+            else:
+                logging.warning(f"Redis connection attempt {attempt + 1} failed: {e}")
+                time.sleep(0.1 * (2 ** attempt))  # Exponential backoff
+        except Exception as e:
+            logging.error(f"Unexpected Redis error: {e}")
+            break
+    return False
 
 # Export the redis client as cache
 cache = redis_client

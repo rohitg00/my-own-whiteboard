@@ -15,6 +15,22 @@ class Whiteboard {
         this.isDrawing = false;
         this.cursors = new Map();
         
+        // Add object management
+        this.canvas.preserveObjectStacking = true;
+        this.canvas.renderOnAddRemove = false;
+        
+        // Batch rendering
+        this.pendingRender = false;
+        this.batchRender = () => {
+            if (!this.pendingRender) {
+                this.pendingRender = true;
+                requestAnimationFrame(() => {
+                    this.canvas.renderAll();
+                    this.pendingRender = false;
+                });
+            }
+        };
+        
         // Initialize viewport state
         this.viewportState = {
             zoom: 1,
