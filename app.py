@@ -94,18 +94,29 @@ def room(room_id):
     return render_template('room.html', room_id=room_id)
 
 @app.route('/room/<room_id>/drawings')
-@cache.memoize(timeout=300)
 def get_room_drawings(room_id):
-    cache_key = f"drawing_data_{room_id}"
-    cached_data = cache.get(cache_key)
-    if cached_data is not None:
-        return {"drawings": cached_data}
-    
-    # If not in cache, get from database
-    drawings = models.DrawingData.query.filter_by(room_id=room_id).all()
-    drawing_data = [eval(d.data) for d in drawings]  # Convert string back to dict
-    cache.set(cache_key, drawing_data, timeout=300)
-    return {"drawings": drawing_data}
+    try:
+        # Always get fresh data from database
+        drawings = models.DrawingData.query.filter_by(room_id=room_id).all()
+        drawing_data = []
+        
+        for drawing in drawings:
+            try:
+                # Parse the stored JSON string
+                path_obj = json.loads(drawing.data)
+                drawing_data.append(path_obj)
+            except json.JSONDecodeError as e:
+                app.logger.error(f"Error parsing drawing data: {e}")
+                continue
+        
+        # Update cache with fresh data
+        cache_key = f"drawing_data_{room_id}"
+        cache.set(cache_key, drawing_data)
+        
+        return {"drawings": drawing_data}
+    except Exception as e:
+        app.logger.error(f"Error retrieving drawings: {e}")
+        return {"drawings": [], "error": "Failed to load drawings"}
 
 @socketio.on('connect')
 def handle_connect():
@@ -121,18 +132,18 @@ def handle_join(data):
 def handle_draw(data):
     room = data['room']
     try:
-        # Ensure data is properly serialized
+        # Serialize the path data properly
         path_data = json.dumps(data['path'])
         
-        # Store in database
+        # Store in database first
         drawing = models.DrawingData(room_id=room, data=path_data)
         db.session.add(drawing)
         db.session.commit()
         
-        # Update cache with serialized data
+        # Update cache after successful database save
         cache_key = f"drawing_data_{room}"
         cached_data = cache.get(cache_key) or []
-        cached_data.append(json.loads(path_data))  # Store as parsed JSON
+        cached_data.append(data['path'])  # Store original path object
         cache.set(cache_key, cached_data)
         
         # Broadcast to room
@@ -141,6 +152,7 @@ def handle_draw(data):
     except Exception as e:
         app.logger.error(f"Error saving drawing: {e}")
         db.session.rollback()
+        socketio.emit('error', {'message': 'Failed to save drawing'}, room=request.sid)
         socketio.emit('error', {'message': 'Failed to save drawing'}, room=request.sid)
 
 @socketio.on('clear')

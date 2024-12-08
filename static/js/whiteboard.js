@@ -66,17 +66,22 @@ class Whiteboard {
             if (!response.ok) throw new Error('Failed to fetch drawings');
             
             const data = await response.json();
-            if (data.drawings && data.drawings.length > 0) {
-                data.drawings.forEach(path => {
-                    if (path) {  // Add null check
+            if (data.drawings && Array.isArray(data.drawings)) {
+                for (const path of data.drawings) {
+                    if (path && typeof path === 'object') {
+                        // Create a new fabric object from the path data
                         fabric.util.enlivenObjects([path], (objects) => {
                             objects.forEach(obj => {
                                 this.canvas.add(obj);
                             });
-                            this.canvas.renderAll();
                         });
                     }
-                });
+                }
+                this.canvas.renderAll();
+            }
+            
+            if (data.error) {
+                console.error('Server reported error:', data.error);
             }
         } catch (error) {
             console.error('Error loading existing drawings:', error);
