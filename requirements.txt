@@ -1,0 +1,9 @@
+flask==3.0.0
+gunicorn==21.2.0
+requests==2.31.0
+flask-socketio==5.3.6
+python-socketio==5.11.1
+python-engineio==4.9.0
+eventlet==0.35.2
+flask-sqlalchemy==3.1.1
+redis==5.0.1
