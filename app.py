@@ -96,27 +96,24 @@ def room(room_id):
 @app.route('/room/<room_id>/drawings')
 def get_room_drawings(room_id):
     try:
-        # Always get fresh data from database
+        app.logger.info(f"Fetching drawings for room {room_id}")
         drawings = models.DrawingData.query.filter_by(room_id=room_id).all()
         drawing_data = []
         
         for drawing in drawings:
             try:
-                # Parse the stored JSON string
                 path_obj = json.loads(drawing.data)
                 drawing_data.append(path_obj)
             except json.JSONDecodeError as e:
                 app.logger.error(f"Error parsing drawing data: {e}")
                 continue
         
-        # Update cache with fresh data
-        cache_key = f"drawing_data_{room_id}"
-        cache.set(cache_key, drawing_data)
-        
+        app.logger.info(f"Found {len(drawing_data)} drawings for room {room_id}")
         return {"drawings": drawing_data}
+        
     except Exception as e:
         app.logger.error(f"Error retrieving drawings: {e}")
-        return {"drawings": [], "error": "Failed to load drawings"}
+        return {"drawings": [], "error": str(e)}
 
 @socketio.on('connect')
 def handle_connect():
@@ -132,27 +129,27 @@ def handle_join(data):
 def handle_draw(data):
     room = data['room']
     try:
-        # Serialize the path data properly
-        path_data = json.dumps(data['path'])
+        # Ensure path data is properly serialized
+        path_data = json.dumps(data['path'], separators=(',', ':'))
         
         # Store in database first
         drawing = models.DrawingData(room_id=room, data=path_data)
         db.session.add(drawing)
         db.session.commit()
+        app.logger.info(f"Drawing saved to database for room {room}")
         
-        # Update cache after successful database save
+        # Update cache with parsed data
         cache_key = f"drawing_data_{room}"
         cached_data = cache.get(cache_key) or []
-        cached_data.append(data['path'])  # Store original path object
+        cached_data.append(data['path'])
         cache.set(cache_key, cached_data)
         
         # Broadcast to room
         socketio.emit('draw_update', data, room=room, skip_sid=request.sid)
         
     except Exception as e:
-        app.logger.error(f"Error saving drawing: {e}")
+        app.logger.error(f"Error saving drawing: {str(e)}")
         db.session.rollback()
-        socketio.emit('error', {'message': 'Failed to save drawing'}, room=request.sid)
         socketio.emit('error', {'message': 'Failed to save drawing'}, room=request.sid)
 
 @socketio.on('clear')

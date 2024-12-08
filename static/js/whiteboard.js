@@ -62,26 +62,25 @@ class Whiteboard {
 
     async loadExistingDrawings() {
         try {
+            console.log('Loading existing drawings...');
             const response = await fetch(`/room/${this.roomId}/drawings`);
             if (!response.ok) throw new Error('Failed to fetch drawings');
             
             const data = await response.json();
+            console.log('Received drawings:', data);
+            
             if (data.drawings && Array.isArray(data.drawings)) {
                 for (const path of data.drawings) {
                     if (path && typeof path === 'object') {
-                        // Create a new fabric object from the path data
                         fabric.util.enlivenObjects([path], (objects) => {
                             objects.forEach(obj => {
+                                console.log('Adding object to canvas:', obj);
                                 this.canvas.add(obj);
+                                this.canvas.renderAll();
                             });
                         });
                     }
                 }
-                this.canvas.renderAll();
-            }
-            
-            if (data.error) {
-                console.error('Server reported error:', data.error);
             }
         } catch (error) {
             console.error('Error loading existing drawings:', error);
