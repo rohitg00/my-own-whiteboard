@@ -229,6 +229,16 @@ def handle_redo(data):
     }, room=room, skip_sid=request.sid)
 
 @socketio.on('clear')
+@socketio.on('cursor_move')
+def handle_cursor_move(data):
+    room = data['room']
+    emit('cursor_update', {
+        'room': room,
+        'userName': data['userName'],
+        'x': data['x'],
+        'y': data['y']
+    }, room=room, include_self=False)
+
 def handle_clear(data):
     room = data['room']
     try:

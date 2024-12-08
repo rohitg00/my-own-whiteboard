@@ -2,6 +2,8 @@ class SocketManager {
     constructor() {
         this.socket = io();
         this.lastRoom = null;
+        this.userName = '';
+        this.cursors = new Map();
         this.setupEventListeners();
     }
 
@@ -37,10 +39,17 @@ class SocketManager {
         });
     }
 
+    setUserName(name) {
+        this.userName = name;
+    }
+
     joinRoom(roomId) {
         console.log('Joining room:', roomId);
         this.lastRoom = roomId;
-        this.socket.emit('join', { room: roomId });
+        this.socket.emit('join', { 
+            room: roomId,
+            userName: this.userName
+        });
     }
 
     emit(event, data) {

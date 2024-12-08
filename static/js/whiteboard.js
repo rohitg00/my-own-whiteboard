@@ -332,6 +332,24 @@ class Whiteboard {
             zoom: 1,
             pan: { x: 0, y: 0 }
         };
+        
+        // Add cursor tracking
+        this.canvas.on('mouse:move', (opt) => {
+            const pointer = this.canvas.getPointer(opt.e);
+            this.socket.emit('cursor_move', {
+                room: this.roomId,
+                userName: this.socket.userName,
+                x: pointer.x,
+                y: pointer.y
+            });
+        });
+
+        // Handle other users' cursors
+        this.socket.on('cursor_update', (data) => {
+            if (data.room === this.roomId && data.userName !== this.socket.userName) {
+                this.updateCursor(data);
+            }
+        });
 
         this.socket.on('error', (error) => {
             console.error('Socket.IO error:', error);
@@ -448,6 +466,45 @@ class Whiteboard {
                 room: this.roomId,
                 viewport: this.viewportState
             });
+    updateCursor(data) {
+        // Remove existing cursor if any
+        const existingCursor = this.canvas.getObjects().find(
+            obj => obj.type === 'group' && obj.id === `cursor_${data.userName}`
+        );
+        if (existingCursor) {
+            this.canvas.remove(existingCursor);
+        }
+
+        // Create new cursor group
+        const cursorGroup = new fabric.Group([], {
+            left: data.x,
+            top: data.y,
+            selectable: false,
+            id: `cursor_${data.userName}`
+        });
+
+        // Add cursor pointer
+        const cursor = new fabric.Triangle({
+            width: 10,
+            height: 10,
+            fill: '#ff0000',
+            angle: 45
+        });
+
+        // Add username text
+        const text = new fabric.Text(data.userName, {
+            fontSize: 12,
+            fill: '#ff0000',
+            left: 10,
+            top: -15
+        });
+
+        cursorGroup.addWithUpdate(cursor);
+        cursorGroup.addWithUpdate(text);
+        this.canvas.add(cursorGroup);
+        this.canvas.renderAll();
+    }
+
         });
 
         this.socket.on('viewport_update', (data) => {

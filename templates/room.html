@@ -37,6 +37,23 @@
             <canvas id="whiteboard"></canvas>
         </div>
     </div>
+    <!-- Username Modal -->
+    <div class="modal fade" id="userNameModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Enter Your Name</h5>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="userName" class="form-control" placeholder="Your name">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="setUserName()">Join Whiteboard</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 
     <!-- Share Modal -->
     <div class="modal fade" id="shareModal" tabindex="-1">
@@ -63,18 +80,29 @@
     <script src="{{ url_for('static', filename='js/whiteboard.js') }}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // Initialize after DOM is loaded
-            const socketManager = new SocketManager();
-            window.whiteboard = new Whiteboard('whiteboard', socketManager, '{{ room_id }}');
-            
-            // Setup event handlers
-            document.getElementById('colorPicker').addEventListener('change', (e) => {
-                whiteboard.setColor(e.target.value);
-            });
+            // Show username modal
+            const userNameModal = new bootstrap.Modal(document.getElementById('userNameModal'));
+            userNameModal.show();
 
-            document.getElementById('brushSize').addEventListener('input', (e) => {
-                whiteboard.setBrushSize(parseInt(e.target.value));
-            });
+            window.setUserName = () => {
+                const userName = document.getElementById('userName').value.trim();
+                if (userName) {
+                    const socketManager = new SocketManager();
+                    socketManager.setUserName(userName);
+                    window.whiteboard = new Whiteboard('whiteboard', socketManager, '{{ room_id }}');
+                    
+                    // Setup event handlers
+                    document.getElementById('colorPicker').addEventListener('change', (e) => {
+                        whiteboard.setColor(e.target.value);
+                    });
+
+                    document.getElementById('brushSize').addEventListener('input', (e) => {
+                        whiteboard.setBrushSize(parseInt(e.target.value));
+                    });
+                    
+                    userNameModal.hide();
+                }
+            };
         });
 
         function copyShareLink() {
