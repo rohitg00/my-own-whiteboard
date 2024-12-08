@@ -158,16 +158,27 @@ def handle_draw(data):
         db.session.add(drawing)
         db.session.commit()
         
-        # Update cache with atomic operation
-        cache_key = f"drawing_data_{room}"
+        # Update cache with atomic operation and versioning
+        from cache_manager import get_cache_key, DRAWING_CACHE_TIMEOUT, prefetch_room_data
+        
+        cache_key = get_cache_key(f"drawing_data_{room}")
         try:
+            # Get existing data with versioned key
             cached_data = cache.get(cache_key)
             drawing_list = json.loads(cached_data) if cached_data else []
             drawing_list.append(data['path'])
-            cache.setex(cache_key, 3600, json.dumps(drawing_list))
+            
+            # Update cache with proper timeout
+            cache.setex(cache_key, DRAWING_CACHE_TIMEOUT, json.dumps(drawing_list))
             app.logger.info(f"Successfully updated cache for room {room}")
+            
+            # Trigger prefetch for frequently accessed rooms
+            prefetch_room_data(room)
+        except redis.RedisError as e:
+            app.logger.error(f"Redis cache update failed: {e}")
+            # Continue execution even if cache fails
         except Exception as e:
-            app.logger.error(f"Cache update failed: {e}")
+            app.logger.error(f"Unexpected error in cache update: {e}")
         
         # Broadcast to all clients in room except sender
         app.logger.info(f"Broadcasting draw update to room {room}")

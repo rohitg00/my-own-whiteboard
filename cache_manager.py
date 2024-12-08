@@ -4,9 +4,15 @@ import time
 import logging
 from datetime import datetime
 
-CACHE_VERSION = "1.0"
+CACHE_VERSION = "1.1"  # Increment version to invalidate old cache
 MAX_RETRIES = 3
 BASE_BACKOFF = 0.1  # 100ms
+
+# Cache configuration
+DRAWING_CACHE_TIMEOUT = 3600  # 1 hour
+ROOM_CACHE_TIMEOUT = 86400   # 24 hours
+USER_PRESENCE_TIMEOUT = 300  # 5 minutes
+PREFETCH_THRESHOLD = 10      # Number of accesses before prefetching
 
 def get_cache_key(base_key, version=CACHE_VERSION):
     """Generate versioned cache key"""

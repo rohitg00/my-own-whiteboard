@@ -198,6 +198,105 @@ class Whiteboard {
         }
     }
 
+    setupZoom() {
+        let lastDistance = 0;
+        
+        // Add mouse wheel zoom
+        this.canvas.on('mouse:wheel', (opt) => {
+            const delta = opt.e.deltaY;
+            let zoom = this.canvas.getZoom();
+            
+            // Calculate new zoom
+            zoom *= 0.999 ** delta;
+            
+            // Limit zoom range
+            zoom = Math.min(Math.max(0.1, zoom), 20);
+            
+            // Get mouse position relative to canvas
+            const pointer = this.canvas.getPointer(opt.e);
+            const point = new fabric.Point(pointer.x, pointer.y);
+            
+            // Set zoom with point as origin
+            this.canvas.zoomToPoint(point, zoom);
+            
+            opt.e.preventDefault();
+            opt.e.stopPropagation();
+        });
+
+        // Add touch gesture support
+        this.canvas.on('touchstart', (opt) => {
+            if (opt.e.touches.length === 2) {
+                const touch1 = opt.e.touches[0];
+                const touch2 = opt.e.touches[1];
+                lastDistance = Math.hypot(
+                    touch2.clientX - touch1.clientX,
+                    touch2.clientY - touch1.clientY
+                );
+            }
+        });
+
+        this.canvas.on('touchmove', (opt) => {
+            if (opt.e.touches.length === 2) {
+                const touch1 = opt.e.touches[0];
+                const touch2 = opt.e.touches[1];
+                const distance = Math.hypot(
+                    touch2.clientX - touch1.clientX,
+                    touch2.clientY - touch1.clientY
+                );
+                
+                if (lastDistance) {
+                    const delta = distance - lastDistance;
+                    let zoom = this.canvas.getZoom();
+                    zoom *= 1 + (delta / 200);
+                    zoom = Math.min(Math.max(0.1, zoom), 20);
+                    
+                    const center = new fabric.Point(
+                        (touch1.clientX + touch2.clientX) / 2,
+                        (touch1.clientY + touch2.clientY) / 2
+                    );
+                    
+                    this.canvas.zoomToPoint(center, zoom);
+                }
+                
+                lastDistance = distance;
+                opt.e.preventDefault();
+            }
+        });
+
+        this.canvas.on('touchend', () => {
+            lastDistance = 0;
+        });
+    }
+
+    zoomIn() {
+        let zoom = this.canvas.getZoom();
+        zoom *= 1.1;
+        zoom = Math.min(zoom, 20);
+        const center = new fabric.Point(
+            this.canvas.width / 2,
+            this.canvas.height / 2
+        );
+        this.canvas.zoomToPoint(center, zoom);
+    }
+
+    zoomOut() {
+        let zoom = this.canvas.getZoom();
+        zoom /= 1.1;
+        zoom = Math.max(zoom, 0.1);
+        const center = new fabric.Point(
+            this.canvas.width / 2,
+            this.canvas.height / 2
+        );
+        this.canvas.zoomToPoint(center, zoom);
+    }
+
+    resetZoom() {
+        const center = new fabric.Point(
+            this.canvas.width / 2,
+            this.canvas.height / 2
+        );
+        this.canvas.zoomToPoint(center, 1);
+    }
     setupEventListeners() {
         this.socket.on('error', (error) => {
             console.error('Socket.IO error:', error);
