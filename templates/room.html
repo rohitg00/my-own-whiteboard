@@ -62,15 +62,19 @@
     <script src="{{ url_for('static', filename='js/socket.js') }}"></script>
     <script src="{{ url_for('static', filename='js/whiteboard.js') }}"></script>
     <script>
+        // Initialize whiteboard first
         const socketManager = new SocketManager();
         const whiteboard = new Whiteboard('whiteboard', socketManager, '{{ room_id }}');
 
-        document.getElementById('colorPicker').addEventListener('change', (e) => {
-            whiteboard.setColor(e.target.value);
-        });
+        // Then setup event handlers
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('colorPicker').addEventListener('change', (e) => {
+                whiteboard.setColor(e.target.value);
+            });
 
-        document.getElementById('brushSize').addEventListener('input', (e) => {
-            whiteboard.setBrushSize(parseInt(e.target.value));
+            document.getElementById('brushSize').addEventListener('input', (e) => {
+                whiteboard.setBrushSize(parseInt(e.target.value));
+            });
         });
 
         function copyShareLink() {
