@@ -1,91 +1,60 @@
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, join_room
-from flask_sqlalchemy import SQLAlchemy
-from flask_caching import Cache
 import os
-import logging
-import time
+from flask import Flask, render_template, request, jsonify
+from flask_socketio import SocketIO, emit, join_room
+from flask_sqlalchemy import SQLAlchemy
 import json
-
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+import redis
+from datetime import datetime
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret!'
+app.config['SECRET_KEY'] = os.urandom(24)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///whiteboard.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Redis Cache Configuration
-redis_url = os.environ.get('REDIS_URL')
-cache_config = {
-    'CACHE_DEFAULT_TIMEOUT': 300
-}
+# Initialize Redis connection with error handling
+redis_url = os.getenv('REDIS_URL')
+try:
+    # Parse the Redis URL to handle authentication properly
+    cache = redis.from_url(redis_url, decode_responses=True)
+    # Test the connection
+    cache.ping()
+    app.logger.info("Successfully connected to Redis")
+except Exception as e:
+    app.logger.error(f"Failed to connect to Redis: {e}")
+    # Fallback to a simple in-memory cache
+    class SimpleCache:
+        def __init__(self):
+            self._cache = {}
+        def get(self, key):
+            return self._cache.get(key)
+        def set(self, key, value, *args, **kwargs):
+            self._cache[key] = value
+        def setex(self, key, time, value):
+            self._cache[key] = value
+        def delete(self, key):
+            self._cache.pop(key, None)
+        def ping(self):
+            return True
+    cache = SimpleCache()
+    app.logger.warning("Using in-memory cache as fallback")
 
-if redis_url:
-    try:
-        # Parse Redis URL to extract authentication
-        from urllib.parse import urlparse, parse_qs
-        parsed_url = urlparse(redis_url)
-        
-        # Ensure URL has proper format and authentication
-        if not redis_url.startswith(('redis://', 'rediss://')):
-            redis_url = f"redis://{redis_url}"
-        
-        cache_config.update({
-            'CACHE_TYPE': 'redis',
-            'CACHE_REDIS_URL': redis_url
-        })
-        
-        # Initialize cache
-        app.config.update(cache_config)
-        cache = Cache(app)
-        
-        # Test connection with retry
-        for attempt in range(3):
-            try:
-                cache.set('test_key', 'test_value')
-                test_value = cache.get('test_key')
-                if test_value == 'test_value':
-                    app.logger.info('Redis cache initialized successfully')
-                    break
-            except Exception as e:
-                app.logger.error(f'Redis connection attempt {attempt + 1} failed: {str(e)}')
-                if attempt < 2:  # Don't sleep on last attempt
-                    time.sleep(1)
-        else:
-            raise Exception("Failed to connect to Redis after 3 attempts")
-            
-    except Exception as e:
-        app.logger.error(f'Redis initialization failed: {str(e)}')
-        app.logger.warning('Falling back to SimpleCache')
-        cache_config['CACHE_TYPE'] = 'simple'
-        app.config.update(cache_config)
-        cache = Cache(app)
-else:
-    app.logger.warning('Redis URL not found, falling back to SimpleCache')
-    cache_config['CACHE_TYPE'] = 'simple'
-    app.config.update(cache_config)
-    cache = Cache(app)
-
-# Initialize extensions
+# Initialize Flask-SocketIO
 socketio = SocketIO(app)
 db = SQLAlchemy(app)
 
+# Room user count tracking
+room_users = {}
+
 # Import models after db initialization to avoid circular imports
 import models
-
-# Create database tables
-with app.app_context():
-    db.create_all()
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
 @app.route('/room/<room_id>')
-@cache.memoize(timeout=300)
 def room(room_id):
-    # Check if room exists, if not create it
+    # Create room if it doesn't exist
     room = models.Room.query.get(room_id)
     if not room:
         room = models.Room(id=room_id)
@@ -97,6 +66,16 @@ def room(room_id):
 def get_room_drawings(room_id):
     try:
         app.logger.info(f"Fetching drawings for room {room_id}")
+        
+        # Try to get from cache first
+        cache_key = f"drawing_data_{room_id}"
+        cached_data = cache.get(cache_key)
+        
+        if cached_data:
+            app.logger.info("Retrieved drawings from cache")
+            return {"drawings": json.loads(cached_data)}
+        
+        # If not in cache, get from database
         drawings = models.DrawingData.query.filter_by(room_id=room_id).all()
         drawing_data = []
         
@@ -108,6 +87,8 @@ def get_room_drawings(room_id):
                 app.logger.error(f"Error parsing drawing data: {e}")
                 continue
         
+        # Update cache with fresh data
+        cache.setex(cache_key, 3600, json.dumps(drawing_data))  # Cache for 1 hour
         app.logger.info(f"Found {len(drawing_data)} drawings for room {room_id}")
         return {"drawings": drawing_data}
         
@@ -123,7 +104,17 @@ def handle_connect():
 def handle_join(data):
     room = data['room']
     join_room(room)
-    app.logger.info(f"Client {request.sid} joined room {room}")
+    
+    # Update user count
+    if room not in room_users:
+        room_users[room] = set()
+    room_users[room].add(request.sid)
+    
+    # Emit updated count to all users in room
+    user_count = len(room_users[room])
+    socketio.emit('user_joined', {'count': user_count}, room=room)
+    
+    app.logger.info(f"Client {request.sid} joined room {room}, total users: {user_count}")
 
 @socketio.on('draw')
 def handle_draw(data):
@@ -140,9 +131,13 @@ def handle_draw(data):
         
         # Update cache with parsed data
         cache_key = f"drawing_data_{room}"
-        cached_data = cache.get(cache_key) or []
-        cached_data.append(data['path'])
-        cache.set(cache_key, cached_data)
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            drawing_list = json.loads(cached_data)
+            drawing_list.append(data['path'])
+            cache.setex(cache_key, 3600, json.dumps(drawing_list))
+        else:
+            cache.setex(cache_key, 3600, json.dumps([data['path']]))
         
         # Broadcast to room
         socketio.emit('draw_update', data, room=room, skip_sid=request.sid)
@@ -152,19 +147,42 @@ def handle_draw(data):
         db.session.rollback()
         socketio.emit('error', {'message': 'Failed to save drawing'}, room=request.sid)
 
+@socketio.on('undo')
+def handle_undo(data):
+    room = data['room']
+    socketio.emit('undo_update', data, room=room, skip_sid=request.sid)
+
+@socketio.on('redo')
+def handle_redo(data):
+    room = data['room']
+    socketio.emit('redo_update', data, room=room, skip_sid=request.sid)
+
 @socketio.on('clear')
 def handle_clear(data):
     room = data['room']
-    # Clear cached drawing data
-    cache_key = f"drawing_data_{room}"
-    cache.delete(cache_key)
-    
-    # Clear drawings from database
-    models.DrawingData.query.filter_by(room_id=room).delete()
-    db.session.commit()
-    
-    socketio.emit('clear_board', room=room, skip_sid=request.sid)
+    try:
+        # Clear cached drawing data
+        cache_key = f"drawing_data_{room}"
+        cache.delete(cache_key)
+        
+        # Clear drawings from database
+        models.DrawingData.query.filter_by(room_id=room).delete()
+        db.session.commit()
+        
+        socketio.emit('clear_board', room=room, skip_sid=request.sid)
+    except Exception as e:
+        app.logger.error(f"Error clearing drawings: {str(e)}")
+        db.session.rollback()
+        socketio.emit('error', {'message': 'Failed to clear drawings'}, room=request.sid)
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    # Update user count for all rooms user was in
+    for room in room_users:
+        if request.sid in room_users[room]:
+            room_users[room].remove(request.sid)
+            user_count = len(room_users[room])
+            socketio.emit('user_left', {'count': user_count}, room=room)
+            app.logger.info(f"Client {request.sid} left room {room}, remaining users: {user_count}")
+    
     app.logger.info(f"Client disconnected: {request.sid}")

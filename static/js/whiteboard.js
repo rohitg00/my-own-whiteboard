@@ -5,6 +5,10 @@ class Whiteboard {
         });
         this.socket = socket;
         this.roomId = roomId;
+        this.history = [];
+        this.redoStack = [];
+        this.currentMode = 'draw';
+        this.isDrawing = false;
         this.initResponsiveCanvas();
         this.init();
     }
@@ -88,6 +92,140 @@ class Whiteboard {
     }
 
     setupTools() {
+    initTools() {
+        // Initialize drawing modes
+        this.modes = {
+            draw: this.initDrawMode.bind(this),
+            rect: this.initRectMode.bind(this),
+            circle: this.initCircleMode.bind(this)
+        };
+        this.setMode('draw');
+    }
+
+    setMode(mode) {
+        if (!this.modes[mode]) return;
+        this.currentMode = mode;
+        this.modes[mode]();
+        // Update UI to show active mode
+        document.querySelectorAll('.tool-group button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`button[onclick="whiteboard.setMode('${mode}')"]`).classList.add('active');
+    }
+
+    initDrawMode() {
+        this.canvas.isDrawingMode = true;
+        this.canvas.off('mouse:down');
+        this.canvas.off('mouse:move');
+        this.canvas.off('mouse:up');
+    }
+
+    initRectMode() {
+        this.canvas.isDrawingMode = false;
+        let rect, origX, origY;
+        
+        this.canvas.on('mouse:down', (o) => {
+            this.isDrawing = true;
+            const pointer = this.canvas.getPointer(o.e);
+            origX = pointer.x;
+            origY = pointer.y;
+            rect = new fabric.Rect({
+                left: origX,
+                top: origY,
+                width: 0,
+                height: 0,
+                fill: 'transparent',
+                stroke: this.canvas.freeDrawingBrush.color,
+                strokeWidth: this.canvas.freeDrawingBrush.width
+            });
+            this.canvas.add(rect);
+        });
+
+        this.canvas.on('mouse:move', (o) => {
+            if (!this.isDrawing) return;
+            const pointer = this.canvas.getPointer(o.e);
+            rect.set({
+                width: Math.abs(pointer.x - origX),
+                height: Math.abs(pointer.y - origY),
+                left: Math.min(origX, pointer.x),
+                top: Math.min(origY, pointer.y)
+            });
+            this.canvas.renderAll();
+        });
+
+        this.canvas.on('mouse:up', () => {
+            this.isDrawing = false;
+            this.history.push(rect);
+            this.redoStack = [];
+            this.socket.emit('draw', {
+                room: this.roomId,
+                path: rect.toJSON()
+            });
+        });
+    }
+
+    initCircleMode() {
+        this.canvas.isDrawingMode = false;
+        let circle, origX, origY;
+        
+        this.canvas.on('mouse:down', (o) => {
+            this.isDrawing = true;
+            const pointer = this.canvas.getPointer(o.e);
+            origX = pointer.x;
+            origY = pointer.y;
+            circle = new fabric.Circle({
+                left: origX,
+                top: origY,
+                radius: 0,
+                fill: 'transparent',
+                stroke: this.canvas.freeDrawingBrush.color,
+                strokeWidth: this.canvas.freeDrawingBrush.width
+            });
+            this.canvas.add(circle);
+        });
+
+        this.canvas.on('mouse:move', (o) => {
+            if (!this.isDrawing) return;
+            const pointer = this.canvas.getPointer(o.e);
+            const radius = Math.sqrt(Math.pow(pointer.x - origX, 2) + Math.pow(pointer.y - origY, 2)) / 2;
+            circle.set({
+                radius: radius,
+                left: origX - radius,
+                top: origY - radius
+            });
+            this.canvas.renderAll();
+        });
+
+        this.canvas.on('mouse:up', () => {
+            this.isDrawing = false;
+            this.history.push(circle);
+            this.redoStack = [];
+            this.socket.emit('draw', {
+                room: this.roomId,
+                path: circle.toJSON()
+            });
+        });
+    }
+
+    undo() {
+        if (this.history.length > 0) {
+            const removed = this.history.pop();
+            this.redoStack.push(removed);
+            this.canvas.remove(removed);
+            this.canvas.renderAll();
+            this.socket.emit('undo', { room: this.roomId });
+        }
+    }
+
+    redo() {
+        if (this.redoStack.length > 0) {
+            const restored = this.redoStack.pop();
+            this.history.push(restored);
+            this.canvas.add(restored);
+            this.canvas.renderAll();
+            this.socket.emit('redo', { room: this.roomId });
+        }
+    }
         this.canvas.freeDrawingBrush.width = 2;
         this.canvas.freeDrawingBrush.color = '#000000';
     }
