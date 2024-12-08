@@ -4,6 +4,7 @@ from flask_socketio import SocketIO, emit, join_room
 from flask_sqlalchemy import SQLAlchemy
 import json
 import redis
+import time
 from datetime import datetime
 
 app = Flask(__name__)
@@ -67,18 +68,6 @@ def init_redis_connection(max_retries=3, retry_delay=1):
 # Initialize cache with retry mechanism
 cache = init_redis_connection()
 
-# Monitor cache health
-def check_cache_health():
-    """Periodic cache health check"""
-    try:
-        if isinstance(cache, redis.Redis):
-            cache.ping()
-            return True
-    except:
-        app.logger.error("Cache health check failed")
-        return False
-    return True
-
 # Initialize Flask-SocketIO
 socketio = SocketIO(app)
 db = SQLAlchemy(app)
@@ -86,7 +75,7 @@ db = SQLAlchemy(app)
 # Room user count tracking
 room_users = {}
 
-# Import models after db initialization to avoid circular imports
+# Import models after db initialization
 import models
 
 @app.route('/')
@@ -129,7 +118,7 @@ def get_room_drawings(room_id):
                 continue
         
         # Update cache with fresh data
-        cache.setex(cache_key, 3600, json.dumps(drawing_data))  # Cache for 1 hour
+        cache.setex(cache_key, 3600, json.dumps(drawing_data))
         app.logger.info(f"Found {len(drawing_data)} drawings for room {room_id}")
         return {"drawings": drawing_data}
         
@@ -146,12 +135,12 @@ def handle_join(data):
     room = data['room']
     join_room(room)
     
-    # Update user count
+    # Update user count with proper room tracking
     if room not in room_users:
         room_users[room] = set()
     room_users[room].add(request.sid)
     
-    # Emit updated count to all users in room
+    # Broadcast user count to all clients in room
     user_count = len(room_users[room])
     socketio.emit('user_joined', {'count': user_count}, room=room)
     
@@ -189,6 +178,22 @@ def handle_draw(data):
         app.logger.error(f"Error saving drawing: {str(e)}")
         db.session.rollback()
 
+@socketio.on('disconnect')
+def handle_disconnect():
+    # Update user count for all rooms user was in
+    for room in list(room_users.keys()):  # Use list to avoid runtime modification
+        if request.sid in room_users[room]:
+            room_users[room].remove(request.sid)
+            user_count = len(room_users[room])
+            socketio.emit('user_left', {'count': user_count}, room=room)
+            app.logger.info(f"Client {request.sid} left room {room}, remaining users: {user_count}")
+            
+            # Clean up empty rooms
+            if len(room_users[room]) == 0:
+                del room_users[room]
+                
+    app.logger.info(f"Client disconnected: {request.sid}")
+
 @socketio.on('undo')
 def handle_undo(data):
     room = data['room']
@@ -217,14 +222,7 @@ def handle_clear(data):
         db.session.rollback()
         socketio.emit('error', {'message': 'Failed to clear drawings'}, room=request.sid)
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    # Update user count for all rooms user was in
-    for room in room_users:
-        if request.sid in room_users[room]:
-            room_users[room].remove(request.sid)
-            user_count = len(room_users[room])
-            socketio.emit('user_left', {'count': user_count}, room=room)
-            app.logger.info(f"Client {request.sid} left room {room}, remaining users: {user_count}")
-    
-    app.logger.info(f"Client disconnected: {request.sid}")
+
+# Start the server
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
