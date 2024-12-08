@@ -66,8 +66,61 @@ class Whiteboard {
             this.canvas.remove(existingCursor);
         }
 
-        // Create cursor group
-        const cursorGroup = new fabric.Group([], {
+        // Create cursor triangle
+        const cursor = new fabric.Triangle({
+            width: 20,
+            height: 20,
+            fill: '#ff4444',
+            stroke: '#000000',
+            strokeWidth: 1,
+            angle: 45,
+            originX: 'center',
+            originY: 'center',
+            selectable: false,
+            evented: false
+        });
+
+        // Create background for text
+        const textBg = new fabric.Rect({
+            fill: 'rgba(0, 0, 0, 0.6)',
+            width: 100,
+            height: 24,
+            rx: 12,
+            ry: 12,
+            originX: 'center',
+            originY: 'center',
+            selectable: false,
+            evented: false
+        });
+
+        // Create username text
+        const text = new fabric.Text(data.userName || 'Anonymous', {
+            fontSize: 14,
+            fill: '#ffffff',
+            fontFamily: 'Arial',
+            originX: 'center',
+            originY: 'center',
+            selectable: false,
+            evented: false
+        });
+
+        // Create group for text and background
+        const textGroup = new fabric.Group([textBg, text], {
+            left: 0,
+            top: -30,
+            selectable: false,
+            evented: false
+        });
+
+        // Adjust background width to match text
+        textBg.set({
+            width: text.width + 20,
+            left: text.left,
+            top: text.top
+        });
+
+        // Create main cursor group
+        const cursorGroup = new fabric.Group([cursor, textGroup], {
             left: data.x,
             top: data.y,
             selectable: false,
@@ -75,31 +128,9 @@ class Whiteboard {
             id: `cursor_${data.userName}`
         });
 
-        // Add cursor pointer
-        const cursor = new fabric.Triangle({
-            width: 15,
-            height: 15,
-            fill: '#ff4444',
-            angle: 45,
-            originX: 'center',
-            originY: 'center'
-        });
-
-        // Add username text with better visibility
-        const text = new fabric.Text(data.userName || 'Anonymous', {
-            fontSize: 14,
-            fill: '#ff4444',
-            backgroundColor: 'rgba(255,255,255,0.8)',
-            padding: 5,
-            left: 10,
-            top: -20,
-            originX: 'left',
-            originY: 'bottom'
-        });
-
-        cursorGroup.addWithUpdate(cursor);
-        cursorGroup.addWithUpdate(text);
+        // Add to canvas and bring to front
         this.canvas.add(cursorGroup);
+        cursorGroup.bringToFront();
         this.canvas.renderAll();
     }
 
