@@ -27,9 +27,12 @@
                     <button class="btn btn-secondary" onclick="whiteboard.redo()" title="Redo (Ctrl/Cmd + Y)">Redo</button>
                 </div>
                 <div class="tool-group">
-                    <button class="btn btn-secondary active" onclick="whiteboard.setMode('draw')">Draw</button>
-                    <button class="btn btn-secondary" onclick="whiteboard.setMode('rect')">Rectangle</button>
-                    <button class="btn btn-secondary" onclick="whiteboard.setMode('circle')">Circle</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.setTool('pen')" title="Pen (Ctrl/Cmd + P)">✏️</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.setTool('line')" title="Line (Ctrl/Cmd + L)">⟋</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.setTool('rectangle')" title="Rectangle (Ctrl/Cmd + R)">□</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.setTool('circle')" title="Circle (Ctrl/Cmd + C)">○</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.setTool('text')" title="Text (Ctrl/Cmd + T)">T</button>
+                    <button class="btn btn-secondary" onclick="whiteboard.setTool('eraser')" title="Eraser (Ctrl/Cmd + E)">🗑️</button>
                 </div>
                 <div class="tool-group">
                     <button class="btn btn-danger" onclick="whiteboard.clear()">Clear</button>
